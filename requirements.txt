@@ -1,0 +1,8 @@
+fastparquet==2024.11.0
+ipykernel==6.29.5
+ipython==9.2.0
+pydantic==2.11.3
+requests==2.32.3
+polars==1.29.0
+matplotlib==3.10.1
+pyarrow==20.0.0
