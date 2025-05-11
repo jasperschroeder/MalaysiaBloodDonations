@@ -34,3 +34,4 @@ def validate_data(df: pl.DataFrame) -> None:
     if no_duplicated != 0:
         raise ValueError(f"{no_duplicated} duplicated rows have been detected.")
     print("No duplicated rows detected.")
+    
