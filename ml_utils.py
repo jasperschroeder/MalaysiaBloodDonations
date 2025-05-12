@@ -57,20 +57,28 @@ def get_or_create_mlflow_experiment(experiment_name: str):
 
 def run_experiment(X_train, y_train, X_val, y_val, units:int, activation: str, dropout: float, optimizer: str, experiment_id: str):
 
-        with mlflow.start_run(experiment_id=experiment_id):
-            early_stopping = create_early_stopping(monitor='val_loss', patience=15)
+    mlflow.tensorflow.autolog(log_models=True, log_datasets=False)
 
-            model = build_model(X_train.shape[1:], units=units, activation=activation, dropout=dropout,
+    with mlflow.start_run(experiment_id=experiment_id):
+        early_stopping = create_early_stopping(monitor='val_loss', patience=15)
+
+        model = build_model(X_train.shape[1:], units=units, activation=activation, dropout=dropout,
                                         optimizer=optimizer, loss='mse', metrics=['mae'])
             
-            _ = model.fit(
-                X_train, y_train,
-                validation_data=(X_val, y_val),
-                epochs=500,
-                batch_size=64,
-                callbacks=[early_stopping],
-                verbose=None
-            )
+        _ = model.fit(
+            X_train, y_train,
+            validation_data=(X_val, y_val),
+            epochs=500,
+            batch_size=64,
+            callbacks=[early_stopping],
+            verbose=None,
+            shuffle=False
+        )
 
-            val_loss = model.evaluate(X_val, y_val, verbose=0)
-            print(f"Validation Loss: {val_loss[0]}, Validation MAE: {val_loss[1]}")
+        val_loss = model.evaluate(X_val, y_val, verbose=0)
+        print(f"Validation Loss: {val_loss[0]}, Validation MAE: {val_loss[1]}")
+        
+        mlflow.log_param("units", units)
+        mlflow.log_param("activation", activation)
+        mlflow.log_param("optimizer", optimizer)
+        mlflow.log_param("dropout", dropout)
