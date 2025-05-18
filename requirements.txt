@@ -5,6 +5,9 @@ pydantic==2.11.3
 requests==2.32.3
 polars==1.29.0
 matplotlib==3.10.1
-pyarrow==20.0.0
+pyarrow==19.0.1
 mlflow==2.22.0
 holidays==0.72
+tensorflow==2.19.0
+keras==3.9.2
+fastapi==0.115.12
