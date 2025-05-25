@@ -1,9 +1,10 @@
-import requests
-import polars as pl
-from io import BytesIO
 import datetime
-from typing import List, Literal
-from pydantic import BaseModel, Field
+from io import BytesIO
+import polars as pl
+from pydantic import BaseModel, Field, field_validator
+import requests
+from typing import List, Literal, Optional
+
 
 def download_data(url: str) -> pl.DataFrame:
     response = requests.get(url)
@@ -34,4 +35,28 @@ def validate_data(df: pl.DataFrame) -> None:
     if no_duplicated != 0:
         raise ValueError(f"{no_duplicated} duplicated rows have been detected.")
     print("No duplicated rows detected.")
+
     
+class DonationPredictionRequest(BaseModel):
+    lag1: int = Field(..., ge=0, lt=10000, description="No. of donations 1 day ago.")
+    lag2: int = Field(..., ge=0, lt=10000, description="No. of donations 2 day ago.")
+    lag3: int = Field(..., ge=0, lt=10000, description="No. of donations 3 day ago.")
+    lag4: int = Field(..., ge=0, lt=10000, description="No. of donations 4 day ago.")
+    lag5: int = Field(..., ge=0, lt=10000, description="No. of donations 5 day ago.")
+    lag6: int = Field(..., ge=0, lt=10000, description="No. of donations 6 day ago.")
+    lag7: int = Field(..., ge=0, lt=10000, description="No. of donations 7 day ago.")
+    nextday: str = Field(..., description="Next day to predict donations for (format: YYYYMMDD).")
+    high_donation_holiday: Optional[int] = Field(0, description="1 if next day is Hari Malaysia, Hari Kebangsaan, Hari Pekerja, or Hari Wesak.")
+    low_donation_holiday: Optional[int] = Field(0, description="1 if next day is Hari Peristiwa, Hari Raya Puasa or Hari Raya Qurban.")
+    religion_or_culture_holiday: Optional[int] = Field(0, description="1 if next day is a religious or cultural holiday.")
+    other_holiday: Optional[int] = Field(0, description="1 if next day is any other national public holiday.")
+    
+    @field_validator('nextday')
+    @classmethod
+    def validate_nextday(cls, value: str) -> str:
+        assert len(value) == 8, "nextday must be in the format YYYYMMDD."
+        try:
+            datetime.datetime.strptime(value, '%Y%m%d')
+        except ValueError:
+            raise ValueError("nextday must be in the format YYYYMMDD.")
+        return value

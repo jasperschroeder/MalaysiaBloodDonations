@@ -111,6 +111,7 @@ def run_experiment(
         val_loss = model.evaluate([X_seq_val, X_features_val], y_val)
         print(f"Validation Loss: {val_loss[0]}, Validation MAE: {val_loss[1]}")
         
+        mlflow.log_param("seq_type", seq_type)
         mlflow.log_param("seq_units", seq_units)
         mlflow.log_param("dense_units", dense_units)
         mlflow.log_param("activation", activation)
