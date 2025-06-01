@@ -1,7 +1,8 @@
 import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping
+from keras.layers import LSTM, Dense, Dropout, Input, SimpleRNN, Concatenate, GRU
 from keras.models import Model
-from keras.layers import LSTM, Dense, Dropout, Input, SimpleRNN, Concatenate
+from keras.optimizers import Adam, RMSprop
 import mlflow
 import absl.logging
 absl.logging.set_verbosity(absl.logging.ERROR)
@@ -54,7 +55,7 @@ def train_val_split_lstm_feature_data(
 
 
 def build_seq_model(seq_shape, features_shape, seq_type: str, seq_units: int, dense_units: int, activation: str, 
-                dropout: float, optimizer: str, loss:str='mse', metrics:list=['mae']
+                dropout: float, optimizer: str, learning_rate: float = 0.001, loss:str='mse', metrics:list=['mae']
 ):
     
     # inputs 
@@ -64,6 +65,8 @@ def build_seq_model(seq_shape, features_shape, seq_type: str, seq_units: int, de
     # seq branch
     if seq_type == 'LSTM':
         x_seq = LSTM(seq_units, activation=activation, return_sequences=False)(seq_input)
+    elif seq_type == 'GRU':
+        x_seq = GRU(seq_units, activation=activation, return_sequences=False)(seq_input)
     else:
         x_seq = SimpleRNN(seq_units, activation=activation, return_sequences=False)(seq_input)    
     x_seq = Dropout(dropout)(x_seq)
@@ -74,16 +77,24 @@ def build_seq_model(seq_shape, features_shape, seq_type: str, seq_units: int, de
     x = Dropout(dropout)(x)
     output = Dense(1)(x)
     
+    # Selecting optimizer with learning rate
+    if optimizer == 'adam':
+        opt = Adam(learning_rate=learning_rate)
+    elif optimizer == 'rmsprop':
+        opt = RMSprop(learning_rate=learning_rate)
+    else:
+        opt = optimizer
+    
     model = Model(inputs=[seq_input, features_input], outputs=output)
-    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+    model.compile(optimizer=opt, loss=loss, metrics=metrics)
     
     return model
     
 
 def run_experiment(
     X_seq_train, X_features_train, y_train, X_seq_val, X_features_val, y_val, 
-    seq_type:str, seq_units:int, dense_units:int, activation: str, dropout: float, optimizer: str, 
-    experiment_id: str
+    seq_type:str, seq_units:int, dense_units:int, activation: str, dropout: float, 
+    optimizer: str, learning_rate: float, batch_size: int, experiment_id: str
 ):
 
     mlflow.tensorflow.autolog(log_models=True, log_datasets=False, silent=True)
@@ -94,7 +105,7 @@ def run_experiment(
         model = build_seq_model(
             seq_shape=X_seq_train.shape[1], features_shape=X_features_train.shape[1], seq_type=seq_type,
             seq_units=seq_units, dense_units=dense_units, activation=activation, dropout=dropout,
-            optimizer=optimizer
+            optimizer=optimizer, learning_rate=learning_rate
         )
                     
         _ = model.fit(
@@ -102,7 +113,7 @@ def run_experiment(
             y_train,
             validation_data=([X_seq_val, X_features_val], y_val),
             epochs=1000,
-            batch_size=64,
+            batch_size=batch_size,
             callbacks=[early_stopping],
             verbose=None,
             shuffle=False
@@ -120,7 +131,7 @@ def run_experiment(
         
 
 def get_best_model(experiment_id, metric:str="metrics.val_mae"):
-    
+
     model_dfs = mlflow.search_runs(experiment_id)
     best_run_id = model_dfs.sort_values(metric, ascending=True)['run_id'].iloc[0]
     return mlflow.pyfunc.load_model(f"runs:/{best_run_id}/model")

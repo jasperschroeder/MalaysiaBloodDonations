@@ -4,16 +4,20 @@ import ml_utils
 import numpy as np
 from setup_and_validation import DonationPredictionRequest
 import datetime
-
+import constants
+import mlflow
 
 with open('x_scaler.pkl', 'rb') as file:
     scaler_x = pickle.load(file)
     
 with open('y_scaler.pkl', 'rb') as file:
     scaler_y = pickle.load(file)
+   
+matching_experiments = [elem for elem in mlflow.search_experiments() if constants.EXPERIMENT_NAME in elem.name]
+max_name = max([exp.name for exp in matching_experiments])
 
 model = ml_utils.get_best_model(
-    ml_utils.get_or_create_mlflow_experiment(experiment_name='NewTest5'),
+    ml_utils.get_or_create_mlflow_experiment(experiment_name=max_name),
     'metrics.val_loss'
 )
    

@@ -51,6 +51,10 @@ class DonationPredictionRequest(BaseModel):
     religion_or_culture_holiday: Optional[int] = Field(0, description="1 if next day is a religious or cultural holiday.")
     other_holiday: Optional[int] = Field(0, description="1 if next day is any other national public holiday.")
     
+    model_config = {
+        "extra": "forbid", # No extra fields allowed
+    }
+    
     @field_validator('nextday')
     @classmethod
     def validate_nextday(cls, value: str) -> str:
