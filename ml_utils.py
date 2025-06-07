@@ -73,7 +73,7 @@ def build_seq_model(seq_shape, features_shape, seq_type: str, seq_units: int, de
     
     # Dense branch 
     x = Concatenate()([x_seq, features_input])
-    x = Dense(dense_units, activation=activation)(x)
+    x = Dense(dense_units, activation='relu')(x) # Setting relu as default activation for dense layers
     x = Dropout(dropout)(x)
     output = Dense(1)(x)
     
@@ -130,7 +130,7 @@ def run_experiment(
         mlflow.log_param("dropout", dropout)
         
 
-def get_best_model(experiment_id, metric:str="metrics.val_mae"):
+def get_best_model(experiment_id, metric:str="metrics.val_loss"):
 
     model_dfs = mlflow.search_runs(experiment_id)
     best_run_id = model_dfs.sort_values(metric, ascending=True)['run_id'].iloc[0]

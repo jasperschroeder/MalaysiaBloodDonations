@@ -1,7 +1,7 @@
 import datetime
 from io import BytesIO
 import polars as pl
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ValidationError
 import requests
 from typing import List, Literal, Optional
 
@@ -58,9 +58,17 @@ class DonationPredictionRequest(BaseModel):
     @field_validator('nextday')
     @classmethod
     def validate_nextday(cls, value: str) -> str:
-        assert len(value) == 8, "nextday must be in the format YYYYMMDD."
+        if len(value) != 8:
+            raise ValidationError("nextday must be in the format YYYYMMDD.")
         try:
             datetime.datetime.strptime(value, '%Y%m%d')
         except ValueError:
-            raise ValueError("nextday must be in the format YYYYMMDD.")
+            raise ValidationError("nextday must be in the format YYYYMMDD.")
         return value
+    
+    @model_validator(mode='after')
+    def validate_lags(self):
+        lags = [self.lag1, self.lag2, self.lag3, self.lag4, self.lag5, self.lag6, self.lag7]
+        if all(lag == lags[0] for lag in lags):
+            raise ValidationError("All lag values cannot be the same.")
+        return self
