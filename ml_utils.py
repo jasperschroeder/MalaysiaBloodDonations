@@ -1,3 +1,4 @@
+import mlflow.tensorflow
 import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping
 from keras.layers import LSTM, Dense, Dropout, Input, SimpleRNN, Concatenate, GRU
@@ -134,4 +135,4 @@ def get_best_model(experiment_id, metric:str="metrics.val_loss"):
 
     model_dfs = mlflow.search_runs(experiment_id)
     best_run_id = model_dfs.sort_values(metric, ascending=True)['run_id'].iloc[0]
-    return mlflow.pyfunc.load_model(f"runs:/{best_run_id}/model")
+    return mlflow.tensorflow.load_model(f"runs:/{best_run_id}/model")

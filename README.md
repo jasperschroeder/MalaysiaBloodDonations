@@ -37,8 +37,5 @@ The dataset contains aggregated numbers of blood donations in Malaysia, split by
 
 
 ## License
-
 This project is licensed under the MIT License.
-
-In this repository, I am experimenting with different neural network structures to build a model for predicting daily blood donations. 
 

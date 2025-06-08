@@ -58,8 +58,7 @@ class DonationPredictionRequest(BaseModel):
     @field_validator('nextday')
     @classmethod
     def validate_nextday(cls, value: str) -> str:
-        if len(value) != 8:
-            raise ValidationError("nextday must be in the format YYYYMMDD.")
+        assert len(value) == 8, "nextday must be in the format YYYYMMDD."
         try:
             datetime.datetime.strptime(value, '%Y%m%d')
         except ValueError:
