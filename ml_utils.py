@@ -24,7 +24,7 @@ def get_or_create_mlflow_experiment(experiment_name: str):
     return experiment.experiment_id
 
 
-def train_val_split_lstm_feature_data(
+def train_val_test_split_feature_data(
     X_seq: np.ndarray,
     X_features: np.ndarray,
     y: np.ndarray,
