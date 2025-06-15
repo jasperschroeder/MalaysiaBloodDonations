@@ -11,6 +11,7 @@ optunia-integration[mlflow]==4.3.0
 polars==1.29.0
 pyarrow==19.0.1
 pydantic==2.11.3
+pytest==8
 requests==2.32.3
 tensorflow==2.19.0
 uvicorn==0.34.2
