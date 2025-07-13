@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import pytest
 from tensorflow.keras.callbacks import EarlyStopping
-from ml_utils import (
+from src.donations.ml_utils import (
     create_early_stopping,
     get_or_create_mlflow_experiment,
     train_val_test_split_feature_data,

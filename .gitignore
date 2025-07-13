@@ -3,3 +3,4 @@ __pycache__
 /*.pkl
 mlruns/
 .pytest_cache/
+**/tmp/*.pkl

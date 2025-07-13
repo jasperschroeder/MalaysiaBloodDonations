@@ -120,7 +120,7 @@ def run_experiment(
             shuffle=False
         )
         
-        val_loss = model.evaluate([X_seq_val, X_features_val], y_val)
+        val_loss = model.evaluate([X_seq_val, X_features_val], y_val, verbose=0)
         print(f"Validation Loss: {val_loss[0]}, Validation MAE: {val_loss[1]}")
         
         mlflow.log_param("seq_type", seq_type)

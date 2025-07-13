@@ -24,8 +24,9 @@ This project analyzes a dataset of blood donations in Malaysia, aiming to uncove
     pip install -r requirements.txt
     ```
 3. Run the analysis notebooks one after the other.
-4. To make use of the API calls shown in the notebook 3_API.ipynb, make sure to first run 
+4. To make use of the API calls shown in the notebook 3_API.ipynb, make sure to run 
     ```bash
+    cd src/donations
     uvicorn api:app --reload
     ```
 to ensure that the API can receive request.

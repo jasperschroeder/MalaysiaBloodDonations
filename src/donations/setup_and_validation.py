@@ -69,5 +69,5 @@ class DonationPredictionRequest(BaseModel):
     def validate_lags(self):
         lags = [self.lag1, self.lag2, self.lag3, self.lag4, self.lag5, self.lag6, self.lag7]
         if all(lag == lags[0] for lag in lags):
-            raise ValidationError("All lag values cannot be the same.")
+            raise ValueError("All lag values cannot be the same.")
         return self

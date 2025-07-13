@@ -1,6 +1,7 @@
 fastapi==0.115.12
 fastparquet==2024.11.0
 holidays==0.72
+httpx==0.28.1
 ipykernel==6.29.5
 ipython==9.2.0
 keras==3.9.2
