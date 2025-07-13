@@ -1,3 +1,7 @@
+import os
+mlruns_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'mlruns'))
+os.environ["MLFLOW_TRACKING_URI"] = f"file:///{mlruns_path.replace('\\', '/')}"
+
 import pickle
 from fastapi import FastAPI
 import ml_utils
@@ -10,10 +14,13 @@ import tensorflow
 
 LOAD_FROM_MLFLOW = False
 
-with open('shared/x_scaler.pkl', 'rb') as file:
+# Get the absolute path to the shared directory
+shared_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../shared'))
+
+with open(os.path.join(shared_dir, 'x_scaler.pkl'), 'rb') as file:
     scaler_x = pickle.load(file)
     
-with open('shared/y_scaler.pkl', 'rb') as file:
+with open(os.path.join(shared_dir, 'y_scaler.pkl'), 'rb') as file:
     scaler_y = pickle.load(file)
    
 matching_experiments = [elem for elem in mlflow.search_experiments() if constants.EXPERIMENT_NAME in elem.name]
@@ -25,8 +32,8 @@ if LOAD_FROM_MLFLOW:
         'metrics.val_loss'
     )
 else:
-    model = tensorflow.keras.models.load_model(f'shared/model_{max_name}.keras')
-    
+    model = tensorflow.keras.models.load_model(os.path.join(shared_dir, f'model_{max_name}.keras'))
+
 
 app = FastAPI(title="Blood Donation Prediction API")
 
