@@ -4,3 +4,4 @@ __pycache__
 mlruns/
 .pytest_cache/
 **/tmp/*.pkl
+**/.ipynb_checkpoints
