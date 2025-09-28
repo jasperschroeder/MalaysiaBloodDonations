@@ -177,16 +177,3 @@ class DataDriftDetector:
 
         return result
     
-    def detect_drift_rolling(
-        self, 
-        data: Union[np.ndarray, pl.DataFrame], 
-        column: str = None,
-        date_column: str = None
-    ) -> pl.DataFrame:
-        # TODO: Implement proper rolling window drift detection
-        pass 
-    
-    
-    def get_data_drift_summary(self, drift_results): 
-        # TODO: Implement summary statistics for drift results
-        pass
