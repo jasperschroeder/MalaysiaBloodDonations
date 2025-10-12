@@ -1,23 +1,25 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from fastapi.testclient import TestClient
 from src.donations.api import app
+import src.donations.api as api
 import datetime
+
 
 # Mock model and scalers for predict endpoint
 def mock_transform(self, x):
     return x
 
+
 def mock_inverse_transform(self, x):
     return x
+
 
 class MockScaler:
     def transform(self, x):
         return x
+
     def inverse_transform(self, x):
         return x
+
 
 class MockModel:
     def predict(self, inputs):
@@ -25,18 +27,20 @@ class MockModel:
         import numpy as np
         return np.array([[42]])
 
+
 # Patch the model and scalers in the api module
-import src.donations.api as api
 api.scaler_x = MockScaler()
 api.scaler_y = MockScaler()
 api.model = MockModel()
 
 client = TestClient(app)
 
+
 def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
 
 def test_predict_valid():
     payload = {
@@ -58,6 +62,7 @@ def test_predict_valid():
     assert "prediction" in response.json()
     assert isinstance(response.json()["prediction"], float)
 
+
 def test_predict_invalid_nextday():
     payload = {
         "lag1": 10,
@@ -76,6 +81,7 @@ def test_predict_invalid_nextday():
     response = client.post("/predict", json=payload)
     assert response.status_code == 422
     assert "detail" in response.json()
+
 
 def test_predict_invalid_lags():
     payload = {
