@@ -26,8 +26,7 @@ This project analyzes a dataset of blood donations in Malaysia, aiming to uncove
 3. Run the analysis notebooks one after the other.
 4. To make use of the API calls shown in the notebook 3_API.ipynb, make sure to run 
     ```bash
-    cd src/donations
-    uvicorn api:app --reload
+   uvicorn src.donations.api:app --reload  --host 0.0.0.0 --port 8001
     ```
 to ensure that the API can receive request.
 

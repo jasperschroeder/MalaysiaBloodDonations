@@ -1,0 +1,21 @@
+# Core API dependencies
+fastapi==0.115.12
+uvicorn==0.34.2
+pydantic==2.11.3
+
+# ML dependencies
+tensorflow==2.19.0
+keras==3.9.2
+numpy
+scikit-learn
+
+# Data processing
+polars==1.29.0
+pyarrow==19.0.1
+
+# HTTP requests
+requests==2.32.3
+httpx==0.28.1
+
+# Additional utilities
+python-multipart
