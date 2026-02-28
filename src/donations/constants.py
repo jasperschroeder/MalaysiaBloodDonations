@@ -8,4 +8,4 @@ EXPERIMENT_NAME = 'MY_blood_donations'
 WINDOW_SIZE = 7
 
 N_TRIALS = 100
-BASE_URL_API = 'http://127.0.0.1:8000'
+BASE_URL_API = 'http://127.0.0.1:8001'

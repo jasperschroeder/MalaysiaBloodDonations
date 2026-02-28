@@ -88,12 +88,12 @@ def build_seq_model(
         opt = RMSprop(learning_rate=learning_rate)
     else:
         opt = optimizer
-    
+
     model = Model(inputs=[seq_input, features_input], outputs=output)
     model.compile(optimizer=opt, loss=loss, metrics=metrics)
-    
+
     return model
-    
+
 
 def run_experiment(
     X_seq_train, X_features_train, y_train, X_seq_val, X_features_val, y_val, seq_type: str, seq_units: int,
@@ -119,12 +119,9 @@ def run_experiment(
             epochs=1000,
             batch_size=batch_size,
             callbacks=[early_stopping],
-            verbose=None,
+            verbose=0,
             shuffle=False
         )
-
-        val_loss = model.evaluate([X_seq_val, X_features_val], y_val, verbose=0)
-        print(f"Validation Loss: {val_loss[0]}, Validation MAE: {val_loss[1]}")
 
         mlflow.log_param("seq_type", seq_type)
         mlflow.log_param("seq_units", seq_units)
