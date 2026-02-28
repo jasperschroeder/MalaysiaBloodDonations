@@ -91,9 +91,11 @@ else:
     end_date = date_max
 
 # Apply Filters
+effective_blood_types = selected_blood_types if selected_blood_types else blood_types
+
 filtered_df = df.filter(
     (pl.col("state").is_in(selected_states if selected_states else states)) &
-    (pl.col("blood_type").is_in(selected_blood_types if selected_blood_types else blood_types)) &
+    (pl.col("blood_type").is_in(effective_blood_types)) &
     (pl.col("date") >= start_date) &
     (pl.col("date") <= end_date)
 )
@@ -104,9 +106,16 @@ if filtered_df.height == 0:
 
 # Key Metrics
 st.sidebar.header("📊 Summary Statistics")
-# Calculate metrics on aggregated daily data to avoid double-counting
+# If 'all' is present in selected blood types, use only 'all' for metrics
+# to avoid double-counting against a/b/ab/o.
+metrics_source_df = (
+    filtered_df.filter(pl.col("blood_type") == "all")
+    if "all" in effective_blood_types
+    else filtered_df
+)
+
 daily_for_metrics = (
-    filtered_df
+    metrics_source_df
     .group_by("date")
     .agg(pl.col("donations").sum().alias("total_donations"))
 )
