@@ -180,10 +180,17 @@ with tab1:
         help="Choose how to group the data"
     )
 
+    # Use only blood_type='all' if selected, else use filtered data to avoid double counting
+    chart_df = (
+        filtered_df.filter(pl.col("blood_type") == "all")
+        if "all" in effective_blood_types
+        else filtered_df
+    )
+
     # Aggregate by selected level
     if aggregation == "Daily":
         daily_agg = (
-            filtered_df
+            chart_df
             .group_by("date")
             .agg(pl.col("donations").sum().alias("total_donations"))
             .sort("date")
@@ -193,7 +200,7 @@ with tab1:
         x_label = "Date"
     elif aggregation == "Weekly":
         daily_agg = (
-            filtered_df
+            chart_df
             .with_columns(pl.col("date").dt.truncate("1w").alias("week_start"))
             .group_by("week_start")
             .agg(pl.col("donations").sum().alias("total_donations"))
@@ -204,7 +211,7 @@ with tab1:
         x_label = "Week Starting (Monday)"
     else:  # Monthly
         daily_agg = (
-            filtered_df
+            chart_df
             .with_columns(pl.col("date").dt.year().alias("year"))
             .with_columns(pl.col("date").dt.month().alias("month"))
             .group_by("year", "month")
@@ -228,9 +235,16 @@ with tab1:
 with tab2:
     st.subheader("Donations by State")
 
+    # Use only blood_type='all' if selected, else use filtered data to avoid double counting
+    chart_df = (
+        filtered_df.filter(pl.col("blood_type") == "all")
+        if "all" in effective_blood_types
+        else filtered_df
+    )
+
     # Aggregate by state
     state_agg = (
-        filtered_df
+        chart_df
         .group_by("state")
         .agg(pl.col("donations").sum().alias("total_donations"))
         .sort("total_donations", descending=True)
@@ -301,9 +315,16 @@ with tab3:
 with tab4:
     st.subheader("Average Donations By Day of the Week")
 
+    # Use only blood_type='all' if selected, else use filtered data to avoid double counting
+    chart_df = (
+        filtered_df.filter(pl.col("blood_type") == "all")
+        if "all" in effective_blood_types
+        else filtered_df
+    )
+
     # First aggregate to daily totals
     daily_total_dow = (
-        filtered_df
+        chart_df
         .group_by("date")
         .agg(pl.col("donations").sum().alias("daily_donations"))
     )
@@ -345,7 +366,7 @@ with tab4:
 
     # First aggregate to daily totals, then average by month
     daily_total = (
-        filtered_df
+        chart_df
         .group_by("date")
         .agg(pl.col("donations").sum().alias("daily_donations"))
     )

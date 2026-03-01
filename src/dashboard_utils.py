@@ -1,10 +1,11 @@
 import datetime
+import os
 import polars as pl
 import requests
 
 
 # API & Prediction Helpers
-API_URL = "http://localhost:8001"
+API_URL = os.getenv("API_URL", "http://localhost:8001")
 API_HEALTH_CHECK_RETRIES = 10
 API_HEALTH_CHECK_DELAY = 1
 
@@ -39,7 +40,13 @@ def infer_lag_values(data: pl.DataFrame, prediction_date: datetime.date) -> dict
             lags[f"lag{i}"] = int(row[0, 0])
         else:
             # Use the most recent available value before target_date
-            recent = daily_agg.filter(pl.col("date") < target_date).sort("date", descending=True).limit(1)
+            recent = (
+                daily_agg
+                .filter(pl.col("date") < target_date)
+                .sort("date", descending=True)
+                .limit(1)
+                .select("total_donations")
+            )
             if recent.height > 0:
                 lags[f"lag{i}"] = int(recent[0, 0])
             else:
