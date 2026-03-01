@@ -9,10 +9,13 @@ import time
 import requests
 import datetime
 
+import dashboard_utils
+
+
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from donations.setup_and_validation import download_data, DonationPredictionRequest  # noqa
+from donations.setup_and_validation import download_data  # noqa
 
 # Page configuration
 st.set_page_config(
@@ -64,14 +67,12 @@ st.sidebar.header("🔍 Filters")
 selected_states = st.sidebar.multiselect(
     "Select States",
     options=states,
-    default=states[:5],  # Default to first 5 states
     help="Choose one or more states to display"
 )
 
 selected_blood_types = st.sidebar.multiselect(
     "Select Blood Types",
     options=blood_types,
-    default=["all"],
     help="Choose blood types to display"
 )
 
@@ -135,18 +136,13 @@ st.sidebar.metric("Total Donations", f"{total_donations:,.0f}")
 st.sidebar.metric("Avg Daily", f"{avg_daily_donations:,.0f}")
 st.sidebar.metric("Peak Day", peak_day_label)
 
-# API & Prediction Helpers
-API_URL = "http://localhost:8001"
-API_HEALTH_CHECK_RETRIES = 10
-API_HEALTH_CHECK_DELAY = 1
-
 
 @st.cache_resource
 def check_api_running():
     """Check if the FastAPI server is running."""
     for _ in range(3):
         try:
-            response = requests.get(f"{API_URL}/health", timeout=2)
+            response = requests.get(f"{dashboard_utils.API_URL}/health", timeout=2)
             if response.status_code == 200:
                 return True, "API is running"
         except requests.exceptions.RequestException:
@@ -160,85 +156,6 @@ def ensure_api_running():
     """Check if the FastAPI server is running."""
     success, message = check_api_running()
     return success, message
-
-
-def infer_lag_values(data: pl.DataFrame, prediction_date: datetime.date) -> dict:
-    """
-    Infer the last 7 days of donations (lags) from the dataset.
-    Uses all data regardless of dashboard filters for more representative values.
-    """
-    # Load full dataset for lag inference (not filtered)
-    # Use only blood_type == 'all' to avoid double counting blood groups.
-    full_df = (
-        data
-        .with_columns(pl.col("date").cast(pl.Date))
-        .filter(pl.col("blood_type") == "all")
-    )
-
-    # Aggregate by date to get daily totals
-    daily_agg = (
-        full_df
-        .group_by("date")
-        .agg(pl.col("donations").sum().alias("total_donations"))
-        .sort("date")
-    )
-
-    lags = {}
-    for i in range(1, 8):
-        target_date = prediction_date - datetime.timedelta(days=i)
-        row = daily_agg.filter(pl.col("date") == target_date).select("total_donations")
-
-        if row.height > 0:
-            lags[f"lag{i}"] = int(row[0, 0])
-        else:
-            # If date not found, use average of recent days
-            recent = daily_agg.filter(
-                (pl.col("date") >= target_date - datetime.timedelta(days=7)) &
-                (pl.col("date") <= target_date + datetime.timedelta(days=7))
-            ).select("total_donations")
-
-            if recent.height > 0:
-                lags[f"lag{i}"] = int(recent.select("total_donations").mean()[0, 0])
-            else:
-                lags[f"lag{i}"] = 2500  # Default fallback
-
-    return lags
-
-
-def call_prediction_api(request_data: dict) -> dict:
-    """Call the prediction API endpoint."""
-    try:
-        response = requests.post(
-            f"{API_URL}/predict",
-            json=request_data,
-            timeout=10
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        return {"error": f"API request failed: {str(e)}"}
-
-
-def calculate_180day_average(prediction_date: datetime.date) -> float:
-    """
-    Calculate average daily donations over the past 180 days before the prediction date.
-    """
-    cutoff_date = prediction_date - datetime.timedelta(days=180)
-    recent_data = (
-        df
-        .filter(
-            (pl.col("blood_type") == "all") &
-            (pl.col("date") >= cutoff_date) &
-            (pl.col("date") < prediction_date)
-        )
-        .group_by("date")
-        .agg(pl.col("donations").sum().alias("total_donations"))
-    )
-
-    if recent_data.height > 0:
-        return float(recent_data.select("total_donations").mean()[0, 0])
-    else:
-        return avg_daily_donations  # Fallback to overall average if no data
 
 
 # Main Dashboard Content
@@ -505,7 +422,7 @@ with tab5:
     prediction_date = tomorrow
 
     # Infer lag values from full dataset
-    inferred_lags = infer_lag_values(df, prediction_date)
+    inferred_lags = dashboard_utils.infer_lag_values(df, prediction_date)
 
     # Allow user to modify lag values
     st.subheader("Historical Donations (Last 7 Days)")
@@ -613,7 +530,7 @@ with tab5:
 
         # Call API
         with st.spinner("Making prediction..."):
-            result = call_prediction_api(request_data)
+            result = dashboard_utils.call_prediction_api(request_data)
 
         if "error" in result:
             st.error(f"Prediction failed: {result['error']}")
@@ -632,7 +549,7 @@ with tab5:
                 )
 
             with col2:
-                avg_180day = calculate_180day_average(prediction_date)
+                avg_180day = dashboard_utils.calculate_180day_average(df, prediction_date, avg_daily_donations)
                 diff = result['prediction'] - avg_180day
                 pct_diff = (diff / avg_180day) * 100 if avg_180day > 0 else 0
                 st.metric(
