@@ -1,4 +1,25 @@
-# Use Python 3.11 slim image as base
+# ============================================================================
+# Stage 1: Builder - Install dependencies and compile packages
+# ============================================================================
+FROM python:3.11-slim AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    g++ \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ============================================================================
+# Stage 2: Runtime - Minimal image with only runtime dependencies
+# ============================================================================
 FROM python:3.11-slim
 
 # Set working directory
@@ -9,19 +30,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
 
-# Install system dependencies
+# Install only runtime system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
-    g++ \
-    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better Docker layer caching
-COPY requirements.txt ./
-
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Copy Python packages from builder stage
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy source code
 COPY src/ ./src/

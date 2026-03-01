@@ -28,7 +28,25 @@ This project analyzes a dataset of blood donations in Malaysia, aiming to uncove
     ```bash
    uvicorn src.donations.api:app --reload  --host 0.0.0.0 --port 8001
     ```
-to ensure that the API can receive request.
+to ensure that the API can receive requests.
+
+## Docker Deployment
+
+For production deployment with both API and dashboard:
+
+```bash
+# Build and start both services
+docker-compose up --build -d
+
+# Access the services
+# API: http://localhost:8001
+# Dashboard: http://localhost:8501
+
+# Stop services
+docker-compose down
+```
+
+See [DOCKER_README.md](DOCKER_README.md) for detailed Docker deployment instructions.
 
 
 ## Dataset

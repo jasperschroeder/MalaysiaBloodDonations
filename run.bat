@@ -1,16 +1,18 @@
 @echo off
-echo Starting Blood Donation API container...
-docker run -d --name blood-donation-api -p 8000:8000 blood-donation-api:latest
+echo Starting Blood Donation API and Dashboard services...
+docker-compose up -d
 
 if %ERRORLEVEL% == 0 (
-    echo Container started successfully!
-    echo API is available at: http://localhost:8000
-    echo Health check: http://localhost:8000/health
-    echo API docs: http://localhost:8000/docs
+    echo Services started successfully!
+    echo API is available at: http://localhost:8001
+    echo API health check: http://localhost:8001/health
+    echo API docs: http://localhost:8001/docs
     echo.
-    echo To stop the container: docker stop blood-donation-api
-    echo To remove the container: docker rm blood-donation-api
+    echo Dashboard is available at: http://localhost:8501
+    echo.
+    echo To view logs: docker-compose logs -f
+    echo To stop services: docker-compose down
 ) else (
-    echo Failed to start container!
+    echo Failed to start services!
     exit /b %ERRORLEVEL%
 )

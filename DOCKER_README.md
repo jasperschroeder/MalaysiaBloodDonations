@@ -1,15 +1,23 @@
-# Blood Donation API - Docker Container
+# Blood Donation Services - Docker Deployment
 
-This document explains how to containerize and deploy the Blood Donation Prediction API.
+This document explains how to deploy the Blood Donation Prediction API and Dashboard using Docker.
 
 ## 🐳 Container Overview
 
-The API has been containerized using Docker for easy deployment and scalability. The container includes:
+The application consists of two containerized services:
 
+### API Service (blood-donation-api)
 - FastAPI application with blood donation prediction endpoint
 - Pre-trained TensorFlow/Keras models (automatically selects latest)
 - Required scalers (x_scaler.pkl, y_scaler.pkl)
-- All necessary Python dependencies
+- Runs on port 8001
+- Multi-stage build for optimized image size
+
+### Dashboard Service (blood-donation-dashboard)
+- Streamlit interactive dashboard for visualization and predictions
+- Connects to API service for predictions
+- Runs on port 8501
+- Data caching with persistent volume
 
 ## 📁 Container Files
 
@@ -21,70 +29,94 @@ The API has been containerized using Docker for easy deployment and scalability.
 - `build.bat` - Windows build script
 - `run.bat` - Windows run script
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Recommended)
 
-### Option 1: Using Build Scripts (Windows)
+### Using Docker Compose (Run Both Services)
+
+This is the **recommended** approach that starts both API and dashboard together:
 
 ```bash
-# Build the container
+# Build and start both services
+docker-compose up --build -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+**Services will be available at:**
+- API: http://localhost:8001
+- API Documentation: http://localhost:8001/docs
+- Dashboard: http://localhost:8501
+
+### Alternative: Using Build Scripts (Windows)
+
+For building individual services:
+
+```bash
+# Build the API container
 .\build.bat
 
-# Run the container
-.\run.bat
-```
-
-### Option 2: Using Docker Commands
-
-```bash
-# Build the image
-docker build -t blood-donation-api:latest .
-
-# Run the container
-docker run -d --name blood-donation-api -p 8000:8000 blood-donation-api:latest
-```
-
-### Option 3: Using Docker Compose
-
-```bash
-# Start the service
-docker-compose up -d
-
-# Stop the service
-docker-compose down
+# Or use docker-compose to build
+docker-compose build
 ```
 
 ## 🔧 Container Configuration
 
 ### Environment Variables
 
+**API Service:**
 - `PYTHONPATH=/app/src` - Python module path
+
+**Dashboard Service:**
+- `PYTHONPATH=/app/src` - Python module path
+- `API_URL=http://blood-donation-api:8001` - API endpoint URL (uses service name for container networking)
 
 ### Ports
 
-- Container exposes port `8000`
-- Maps to host port `8000` by default
+- **API**: Exposes port `8001`, maps to host port `8001`
+- **Dashboard**: Exposes port `8501`, maps to host port `8501`
 
-### Health Check
+### Networking
 
-The container includes a health check endpoint at `/health` that runs every 30 seconds.
+Both services run on a shared `blood-donation-network` bridge network, allowing:
+- Dashboard to communicate with API using service name `blood-donation-api`
+- Dashboard waits for API health check before starting (dependency management)
+
+### Health Checks
+
+Both containers include health check endpoints:
+- **API**: `/health` - checks every 30 seconds
+- **Dashboard**: `/_stcore/health` - checks every 30 seconds
 
 ## 📡 API Endpoints
 
 Once running, the API provides:
 
-- **Health Check**: `GET http://localhost:8000/health`
-- **Prediction**: `POST http://localhost:8000/predict`
-- **Documentation**: `http://localhost:8000/docs` (Swagger UI)
-- **OpenAPI Schema**: `http://localhost:8000/openapi.json`
+- **Health Check**: `GET http://localhost:8001/health`
+- **Prediction**: `POST http://localhost:8001/predict`
+- **Documentation**: `http://localhost:8001/docs` (Swagger UI)
+- **OpenAPI Schema**: `http://localhost:8001/openapi.json`
+
+## 📊 Dashboard
+
+The Streamlit dashboard provides:
+
+- Interactive data visualization
+- Historical donation trends by state and blood type
+- Prediction interface with API integration
+- Automatic data caching for performance
 
 ### Example API Usage
 
 ```bash
 # Health check
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Make a prediction
-curl -X POST "http://localhost:8000/predict" \
+curl -X POST "http://localhost:8001/predict" \
      -H "Content-Type: application/json" \
      -d '{
        "lag1": 1200,
@@ -106,23 +138,43 @@ curl -X POST "http://localhost:8000/predict" \
 
 ### View running containers
 ```bash
-docker ps
+docker-compose ps
 ```
 
 ### View container logs
 ```bash
-docker logs blood-donation-api
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f blood-donation-api
+docker-compose logs -f blood-donation-dashboard
 ```
 
-### Stop and remove container
+### Restart services
 ```bash
-docker stop blood-donation-api
-docker rm blood-donation-api
+# All services
+docker-compose restart
+
+# Specific service
+docker-compose restart blood-donation-api
 ```
 
-### Remove the image
+### Stop and remove containers
 ```bash
-docker rmi blood-donation-api:latest
+docker-compose down
+
+# Also remove volumes
+docker-compose down -v
+```
+
+### Rebuild services
+```bash
+# Rebuild without cache
+docker-compose build --no-cache
+
+# Rebuild and restart
+docker-compose up --build -d
 ```
 
 ## 🏗️ Container Architecture
@@ -145,9 +197,31 @@ docker rmi blood-donation-api:latest
 
 ### Key Features
 
-1. **Path Adaptation**: Automatically detects container environment and adjusts file paths
-2. **Model Loading**: Automatically selects the latest model file
-3. **Optimized Dependencies**: Uses minimal required packages for production
+1. **Service Communication**: Dashboard automatically connects to API using Docker networking
+2. **Dependency Management**: Dashboard waits for API health check before starting
+3. **Path Adaptation**: Automatically detects container environment and adjusts file paths
+4. **Model Loading**: Automatically selects the latest model file
+5. **Optimized Dependencies**: Uses minimal required packages for production
+6. **Multi-Stage Builds**: Reduces final image size by removing build tools
+7. **Persistent Caching**: Dashboard data cache persists via volume mount
+
+## 🔧 Optimization Features
+
+### Multi-Stage Builds
+Both Dockerfiles use multi-stage builds:
+- **Builder Stage**: Installs dependencies with gcc/g++ for compilation
+- **Runtime Stage**: Copies only compiled packages, excludes build tools
+- **Result**: ~30-40% smaller final images
+
+### Pinned Dependencies
+All packages in `requirements-container.txt` have pinned versions for:
+- Reproducible builds
+- Avoiding breaking changes
+- Consistent deployments
+
+### Minimal Runtime Dependencies
+- API container: Only includes FastAPI, ML packages, and data processing
+- Runtime images: Only curl for health checks, no compilers
 4. **Health Monitoring**: Built-in health checks for container orchestration
 5. **Enhanced API Response**: Includes input features in prediction response
 
