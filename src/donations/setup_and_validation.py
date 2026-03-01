@@ -27,16 +27,16 @@ def validate_data(df: pl.DataFrame) -> None:
             blood_type=[row['blood_type']],
             donations=row['donations']
         )
-        
+
     print("All rows have been validated successfully.")
-    
+
     no_duplicated = df.is_duplicated().sum()
-    
+
     if no_duplicated != 0:
         raise ValueError(f"{no_duplicated} duplicated rows have been detected.")
     print("No duplicated rows detected.")
 
-    
+
 class DonationPredictionRequest(BaseModel):
     lag1: int = Field(..., ge=0, lt=10000, description="No. of donations 1 day ago.")
     lag2: int = Field(..., ge=0, lt=10000, description="No. of donations 2 day ago.")
@@ -46,15 +46,22 @@ class DonationPredictionRequest(BaseModel):
     lag6: int = Field(..., ge=0, lt=10000, description="No. of donations 6 day ago.")
     lag7: int = Field(..., ge=0, lt=10000, description="No. of donations 7 day ago.")
     nextday: str = Field(..., description="Next day to predict donations for (format: YYYYMMDD).")
-    high_donation_holiday: Optional[int] = Field(0, description="1 if next day is Hari Malaysia, Hari Kebangsaan, Hari Pekerja, or Hari Wesak.")
-    low_donation_holiday: Optional[int] = Field(0, description="1 if next day is Hari Peristiwa, Hari Raya Puasa or Hari Raya Qurban.")
-    religion_or_culture_holiday: Optional[int] = Field(0, description="1 if next day is a religious or cultural holiday.")
-    other_holiday: Optional[int] = Field(0, description="1 if next day is any other national public holiday.")
-    
+    high_donation_holiday: Optional[int] = Field(
+        0, description="1 if next day is Hari Malaysia, Hari Kebangsaan, Hari Pekerja, or Hari Wesak."
+    )
+    low_donation_holiday: Optional[int] = Field(
+        0, description="1 if next day is Hari Peristiwa, Hari Raya Puasa or Hari Raya Qurban."
+    )
+    religion_or_culture_holiday: Optional[int] = Field(
+        0, description="1 if next day is a religious or cultural holiday."
+    )
+    other_holiday: Optional[int] = Field(
+        0, description="1 if next day is any other national public holiday."
+    )
     model_config = {
-        "extra": "forbid", # No extra fields allowed
+        "extra": "forbid",  # No extra fields allowed
     }
-    
+
     @field_validator('nextday')
     @classmethod
     def validate_nextday(cls, value: str) -> str:
@@ -64,7 +71,7 @@ class DonationPredictionRequest(BaseModel):
         except ValueError:
             raise ValidationError("nextday must be in the format YYYYMMDD.")
         return value
-    
+
     @model_validator(mode='after')
     def validate_lags(self):
         lags = [self.lag1, self.lag2, self.lag3, self.lag4, self.lag5, self.lag6, self.lag7]
