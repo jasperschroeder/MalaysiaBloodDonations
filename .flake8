@@ -1,2 +1,10 @@
 [flake8]
 max-line-length = 120
+exclude =
+    *.ipynb
+    .venv
+    mlruns
+    tmp
+per-file-ignores =
+    # Notebooks: ignore style rules that don't fit cell-based editing
+    *.ipynb:E501,W291,W293,E402,E302,E303
