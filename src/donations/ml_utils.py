@@ -1,14 +1,23 @@
+from typing import Dict, Iterator, Optional, Tuple
+
 import mlflow.tensorflow
 import numpy as np
 from tensorflow.keras.callbacks import EarlyStopping
-from keras.layers import (
+from tensorflow.keras.layers import (
     Concatenate, Dense, Dropout, GRU, Input, LSTM, SimpleRNN
 )
-from keras.models import Model
-from keras.optimizers import Adam, RMSprop
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam, RMSprop
 import mlflow
 import absl.logging
 import warnings
+
+# Support both package imports (src.donations.ml_utils) and top-level
+# imports (ml_utils, as used by tests via pytest.ini pythonpath).
+try:
+    from .evaluation import compute_regression_metrics
+except ImportError:
+    from evaluation import compute_regression_metrics
 
 absl.logging.set_verbosity(absl.logging.ERROR)
 warnings.filterwarnings("ignore")
@@ -72,7 +81,7 @@ def build_seq_model(
     elif seq_type == 'GRU':
         x_seq = GRU(seq_units, activation=activation, return_sequences=False)(seq_input)
     else:
-        x_seq = SimpleRNN(seq_units, activation=activation, return_sequences=False)(seq_input)    
+        x_seq = SimpleRNN(seq_units, activation=activation, return_sequences=False)(seq_input)
     x_seq = Dropout(dropout)(x_seq)
 
     # Dense branch
@@ -98,8 +107,12 @@ def build_seq_model(
 def run_experiment(
     X_seq_train, X_features_train, y_train, X_seq_val, X_features_val, y_val, seq_type: str, seq_units: int,
     dense_units: int, activation: str, dropout: float, optimizer: str, learning_rate: float, batch_size: int,
-    experiment_id: str
+    experiment_id: str, extra_params: Optional[Dict] = None
 ):
+    """Train one sequence model and log a complete record to MLflow.
+
+    Returns the Keras training history so callers can inspect convergence.
+    """
 
     mlflow.tensorflow.autolog(log_models=True, log_datasets=False, silent=True)
 
@@ -112,7 +125,7 @@ def run_experiment(
             optimizer=optimizer, learning_rate=learning_rate
         )
 
-        _ = model.fit(
+        history = model.fit(
             [X_seq_train, X_features_train],
             y_train,
             validation_data=([X_seq_val, X_features_val], y_val),
@@ -129,6 +142,122 @@ def run_experiment(
         mlflow.log_param("activation", activation)
         mlflow.log_param("optimizer", optimizer)
         mlflow.log_param("dropout", dropout)
+        mlflow.log_param("learning_rate", learning_rate)
+        mlflow.log_param("batch_size", batch_size)
+        if extra_params:
+            mlflow.log_params({k: str(v) for k, v in extra_params.items()})
+
+        mlflow.log_metric("epochs_trained", len(history.history["loss"]))
+        mlflow.log_metric("final_train_loss", float(history.history["loss"][-1]))
+        mlflow.log_metric("final_val_loss", float(history.history["val_loss"][-1]))
+
+    return history
+
+
+def log_regression_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_prev: Optional[np.ndarray] = None,
+    prefix: str = "test"
+) -> Dict[str, float]:
+    """Compute the standard metric bundle and log it to the active MLflow run."""
+    metrics = compute_regression_metrics(y_true, y_pred, y_prev=y_prev)
+    mlflow.log_metrics({f"{prefix}_{name}": value for name, value in metrics.items()})
+    return metrics
+
+
+def walk_forward_splits(
+    n_samples: int,
+    n_splits: int = 5,
+    val_size: Optional[int] = None,
+    gap: int = 0,
+    min_train_size: Optional[int] = None
+) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
+    """Yield (train_idx, val_idx) expanding-window time-series folds.
+
+    The validation window of each fold always lies strictly after the
+    training window, with an optional purge gap between them (use at least
+    the sequence window size so lag features cannot leak across the fold
+    boundary).
+    """
+    if n_splits < 1:
+        raise ValueError("n_splits must be at least 1")
+    if gap < 0:
+        raise ValueError("gap must be non-negative")
+
+    if min_train_size is None:
+        min_train_size = max(int(n_samples * 0.5), 1)
+    if val_size is None:
+        val_size = max((n_samples - min_train_size - gap) // n_splits, 1)
+
+    if min_train_size + gap + val_size > n_samples:
+        raise ValueError(
+            "Not enough samples for the requested split configuration "
+            f"(n_samples={n_samples}, min_train_size={min_train_size}, "
+            f"gap={gap}, val_size={val_size})"
+        )
+
+    for i in range(n_splits):
+        train_end = min_train_size + i * val_size
+        val_start = train_end + gap
+        val_end = min(val_start + val_size, n_samples)
+        if val_end - val_start < 1:
+            break
+        yield np.arange(0, train_end), np.arange(val_start, val_end)
+
+
+def scale_train_val(
+    X_seq_train: np.ndarray,
+    X_features_train: np.ndarray,
+    y_train: np.ndarray,
+    X_seq_val: Optional[np.ndarray] = None,
+    X_features_val: Optional[np.ndarray] = None,
+    y_val: Optional[np.ndarray] = None,
+    scaler_cls=None
+) -> Dict:
+    """Fit scalers on training data only and transform train/val partitions.
+
+    Prevents the data leakage caused by fitting scalers before the split.
+    The sequence array is scaled with the target (y) scaler, matching the
+    original training pipeline.
+
+    Returns a dict with scaled arrays ('X_seq_train', 'X_features_train',
+    'y_train', and 'X_seq_val'/'X_features_val'/'y_val' when provided) plus
+    the fitted 'y_scaler' and 'x_scaler' for later inverse transforms.
+    """
+    if scaler_cls is None:
+        from sklearn.preprocessing import RobustScaler
+        scaler_cls = RobustScaler
+
+    window_size = X_seq_train.shape[1]
+
+    y_scaler = scaler_cls()
+    x_scaler = scaler_cls()
+
+    # Fit the target scaler on y_train first (matching the original
+    # pipeline), then reuse it for the donation-scale sequence lags.
+    y_train_scaled = y_scaler.fit_transform(y_train.reshape(-1, 1)).flatten()
+
+    result = {
+        "X_seq_train": y_scaler.transform(
+            X_seq_train.reshape(-1, 1)
+        ).reshape(-1, window_size, 1),
+        "X_features_train": x_scaler.fit_transform(X_features_train),
+        "y_train": y_train_scaled,
+        "y_scaler": y_scaler,
+        "x_scaler": x_scaler,
+    }
+
+    if X_seq_val is not None:
+        result["X_seq_val"] = y_scaler.transform(
+            X_seq_val.reshape(-1, 1)
+        ).reshape(-1, window_size, 1)
+    if X_features_val is not None:
+        result["X_features_val"] = x_scaler.transform(X_features_val)
+    if y_val is not None:
+        result["y_val"] = y_scaler.transform(y_val.reshape(-1, 1)).flatten()
+
+    return result
 
 
 def get_best_model(experiment_id, metric: str = "metrics.val_loss"):

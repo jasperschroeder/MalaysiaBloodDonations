@@ -6,10 +6,17 @@ import requests
 from typing import List, Literal, Optional
 
 
-def download_data(url: str) -> pl.DataFrame:
-    response = requests.get(url)
-    response.raise_for_status()
-    return pl.read_parquet(BytesIO(response.content))
+def download_data(url: str, timeout: int = 60, retries: int = 3) -> pl.DataFrame:
+    """Download the parquet dataset with a timeout and simple retry loop."""
+    last_error = None
+    for _ in range(max(1, retries)):
+        try:
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
+            return pl.read_parquet(BytesIO(response.content))
+        except requests.exceptions.RequestException as e:
+            last_error = e
+    raise last_error
 
 
 class BloodDonationValidator(BaseModel):
@@ -20,7 +27,7 @@ class BloodDonationValidator(BaseModel):
 
 
 def validate_data(df: pl.DataFrame) -> None:
-    for row in df.iter_rows(named=True):        
+    for row in df.iter_rows(named=True):
         BloodDonationValidator(
             date=row['date'],
             state=row['state'],
