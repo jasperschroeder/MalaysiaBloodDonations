@@ -25,25 +25,34 @@
 
 The Malaysia Blood Donations Dashboard provides:
 
-- **📈 Time Series Tab**: Visualize daily donation trends with interactive date range filters
-- **🗺️ State Comparison Tab**: Bar chart comparing total donations across all states
-- **🔴 Blood Type Analysis Tab**: Pie chart and table showing blood type distribution
-- **📅 Patterns & Trends Tab**: 
+- **📈 Time Series Tab**: Interactive Plotly area chart of daily donation trends with hover tooltips and date range filters
+- **🗺️ State Comparison Tab**: Interactive bar chart comparing total donations across all states
+- **📊 State Trends Tab**: Multi-state historical trend overlay with an adjustable rolling-average window, plus a yearly totals comparison per state
+- **🔴 Blood Type Analysis Tab**: Interactive donut chart and table showing blood type distribution
+- **📅 Patterns & Trends Tab**:
   - Weekly patterns showing donation trends by day of week
-  - State × Blood Type heatmap for detailed cross-analysis
+  - Monthly and week-of-year seasonality charts
+- **🔮 Predictions Tab**: Next-day donation forecast powered by the ML prediction API, with a period comparison against the 180-day average
+
+All charts are built with Plotly for interactive hover tooltips, zoom/pan, and legend toggling.
 
 ### Filters (Sidebar)
 
 - **States**: Multi-select filter for choosing one or more states
 - **Blood Types**: Filter by blood type (A, B, O, AB, all)
 - **Date Range**: Select custom date range for analysis
+- **Refresh Data**: Force a fresh download from data.gov.my instead of using the cached pickle
 - **Summary Statistics**: Real-time stats including total, average, and peak donations
+
+### Overview KPIs
+
+At the top of the main content area, a KPI row shows total donations, average daily donations, the peak day, and a **period-over-period** comparison against the immediately preceding period of equal length (e.g. selecting the last 30 days compares against the 30 days before that).
 
 ### Data Management
 
 - **Automatic Download**: On first run, the app automatically downloads the latest blood donation data from data.gov.my
 - **Caching**: Downloaded data is cached in `tmp/blood_donations.pkl` for fast subsequent loads
-- **Smart Refresh**: Data is loaded from cache for speed; modify the pickle file to refresh with latest data
+- **Smart Refresh**: Data is loaded from the cached pickle on startup for speed; use the **🔄 Refresh Data** sidebar button to force a fresh download
 
 ---
 
@@ -88,7 +97,7 @@ src/dashboard.py
 
 - **Streamlit**: Web app framework (lightweight, fast)
 - **Polars**: Fast data processing
-- **Matplotlib**: Visualization
+- **Plotly**: Interactive visualization (hover tooltips, zoom/pan, legend toggling)
 - **Pickle**: Data serialization for caching
 
 ---
@@ -144,8 +153,7 @@ Streamlit settings are in `.streamlit/config.toml`:
 ## Future Enhancements
 
 Possible additions:
-- Real-time predictions using the ML model from the API
-- Data drift detection indicators
-- State-level trends with forecasting
 - Export filtered data to CSV/Excel
 - Donation alerts/notifications
+- Per-state forecasting using the ML model from the API
+- State × Blood Type heatmap for detailed cross-analysis
