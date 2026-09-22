@@ -69,6 +69,74 @@ def call_prediction_api(request_data: dict) -> dict:
         return {"error": f"API request failed: {str(e)}"}
 
 
+def compute_period_over_period_delta(
+    state_and_blood_type_filtered_df: pl.DataFrame,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> dict:
+    """
+    Compare total donations in the selected [start_date, end_date] window against the
+    immediately preceding window of equal length, using a dataframe already filtered by
+    state/blood-type selections (but not yet by date).
+
+    Returns a dict with current_total, previous_total, absolute_change and pct_change.
+    `previous_total`/`pct_change` are None when there is no prior data to compare against.
+    """
+    window_length = (end_date - start_date).days + 1
+    previous_end = start_date - datetime.timedelta(days=1)
+    previous_start = previous_end - datetime.timedelta(days=window_length - 1)
+
+    current_total = (
+        state_and_blood_type_filtered_df
+        .filter((pl.col("date") >= start_date) & (pl.col("date") <= end_date))
+        .select("donations")
+        .sum()[0, 0]
+    ) or 0
+
+    previous_df = state_and_blood_type_filtered_df.filter(
+        (pl.col("date") >= previous_start) & (pl.col("date") <= previous_end)
+    )
+
+    if previous_df.height == 0:
+        return {
+            "current_total": current_total,
+            "previous_total": None,
+            "absolute_change": None,
+            "pct_change": None,
+        }
+
+    previous_total = previous_df.select("donations").sum()[0, 0] or 0
+    absolute_change = current_total - previous_total
+    pct_change = (absolute_change / previous_total * 100) if previous_total > 0 else None
+
+    return {
+        "current_total": current_total,
+        "previous_total": previous_total,
+        "absolute_change": absolute_change,
+        "pct_change": pct_change,
+    }
+
+
+def add_rolling_average(
+    df: pl.DataFrame, value_col: str, window: int, group_col: str | None = None
+) -> pl.DataFrame:
+    """
+    Add a rolling average column (`{value_col}_rolling_avg`) computed over `window` periods,
+    sorted by date. When `group_col` is provided, the rolling average is computed per group
+    (e.g. per state) instead of across the whole dataset.
+    """
+    sort_cols = [group_col, "date"] if group_col else ["date"]
+    rolling_expr = pl.col(value_col).rolling_mean(window_size=window, min_samples=1)
+    if group_col:
+        rolling_expr = rolling_expr.over(group_col)
+
+    return (
+        df
+        .sort(sort_cols)
+        .with_columns(rolling_expr.alias(f"{value_col}_rolling_avg"))
+    )
+
+
 def calculate_180day_average(
     df: pl.DataFrame, prediction_date: datetime.date, avg_daily_donations: float
 ) -> float:

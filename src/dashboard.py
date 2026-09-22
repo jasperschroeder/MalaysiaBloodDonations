@@ -1,8 +1,7 @@
 import streamlit as st
 import polars as pl
 import pickle
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
+import plotly.express as px
 from pathlib import Path
 import sys
 import time
@@ -25,7 +24,44 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("🩸 Malaysia Blood Donations Dashboard")
+# Custom styling for a more distinctive, "hero banner" look and consistent
+# Plotly-friendly metric cards, on top of the base red/white Streamlit theme.
+st.markdown(
+    """
+    <style>
+    .hero-banner {
+        background: linear-gradient(135deg, #c0392b 0%, #e74c3c 50%, #ec7063 100%);
+        padding: 1.75rem 2rem;
+        border-radius: 12px;
+        color: white;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 14px rgba(192, 57, 43, 0.25);
+    }
+    .hero-banner h1 {
+        margin: 0;
+        font-size: 2rem;
+        color: white;
+    }
+    .hero-banner p {
+        margin: 0.35rem 0 0 0;
+        opacity: 0.9;
+        font-size: 1rem;
+    }
+    div[data-testid="stMetric"] {
+        background-color: #f8f9fb;
+        border: 1px solid #eceef1;
+        border-radius: 10px;
+        padding: 0.75rem 1rem 0.5rem 1rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+    </style>
+    <div class="hero-banner">
+        <h1>🩸 Malaysia Blood Donations Dashboard</h1>
+        <p>Explore national donation trends, compare states, and forecast tomorrow's turnout.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Constants
 DATA_URL = "https://storage.data.gov.my/healthcare/blood_donations_state.parquet"
@@ -35,8 +71,17 @@ PKL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Data Loading & Caching
 @st.cache_resource
-def load_or_download_data():
-    """Download latest blood donation data and save to cache."""
+def load_or_download_data(force_refresh: bool = False):
+    """
+    Load blood donation data from the local pickle cache when available, downloading
+    a fresh copy from data.gov.my only on first run or when `force_refresh` is True.
+    """
+    if not force_refresh and PKL_PATH.exists():
+        try:
+            with open(PKL_PATH, 'rb') as f:
+                return pickle.load(f)
+        except (pickle.PickleError, EOFError) as e:
+            st.sidebar.warning(f"Cached data was unreadable ({e}); re-downloading.")
 
     try:
         df = download_data(DATA_URL)
@@ -63,6 +108,11 @@ date_max = df.select("date").max()[0, 0]
 
 # Sidebar Filters
 st.sidebar.header("🔍 Filters")
+
+if st.sidebar.button("🔄 Refresh Data", use_container_width=True, help="Re-download the latest data from data.gov.my"):
+    load_or_download_data.clear()
+    df = load_or_download_data(force_refresh=True).with_columns(pl.col("date").cast(pl.Date))
+    st.rerun()
 
 selected_states = st.sidebar.multiselect(
     "Select States",
@@ -136,6 +186,34 @@ st.sidebar.metric("Total Donations", f"{total_donations:,.0f}")
 st.sidebar.metric("Avg Daily", f"{avg_daily_donations:,.0f}")
 st.sidebar.metric("Peak Day", peak_day_label)
 
+# Period-over-period comparison (uses full date history, filtered only by
+# state/blood-type, so the "previous period" isn't clipped by the date filter).
+state_filtered_df = df.filter(pl.col("state").is_in(selected_states if selected_states else states))
+period_comparison_source_df = (
+    state_filtered_df.filter(pl.col("blood_type") == "all")
+    if "all" in effective_blood_types
+    else state_filtered_df.filter(pl.col("blood_type").is_in(effective_blood_types))
+)
+period_delta = dashboard_utils.compute_period_over_period_delta(
+    period_comparison_source_df, start_date, end_date
+)
+
+# Headline KPI row in the main content area
+st.subheader("📊 Overview")
+kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+kpi1.metric("Total Donations", f"{total_donations:,.0f}")
+kpi2.metric("Avg Daily Donations", f"{avg_daily_donations:,.0f}")
+kpi3.metric("Peak Day", peak_day_label)
+if period_delta["pct_change"] is not None:
+    kpi4.metric(
+        "vs. Previous Period",
+        f"{period_delta['pct_change']:+.1f}%",
+        delta=f"{period_delta['absolute_change']:+,.0f} donations",
+        help="Compared to the immediately preceding period of equal length",
+    )
+else:
+    kpi4.metric("vs. Previous Period", "N/A", help="Not enough historical data before the selected range")
+
 
 @st.cache_resource
 def check_api_running():
@@ -160,10 +238,12 @@ def ensure_api_running():
 
 # Main Dashboard Content
 
-# Tab 1: Time Series Trends
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+PLOTLY_TEMPLATE = "plotly_white"
+
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Time Series",
     "🗺️ State Comparison",
+    "📊 State Trends",
     "🔴 Blood Type Analysis",
     "📅 Patterns & Trends",
     "🔮 Predictions"
@@ -195,9 +275,7 @@ with tab1:
             .agg(pl.col("donations").sum().alias("total_donations"))
             .sort("date")
         )
-        dates = daily_agg.select("date").to_series().to_list()
-        donations = daily_agg.select("total_donations").to_series().to_list()
-        x_label = "Date"
+        x_col, x_label = "date", "Date"
     elif aggregation == "Weekly":
         daily_agg = (
             chart_df
@@ -206,9 +284,7 @@ with tab1:
             .agg(pl.col("donations").sum().alias("total_donations"))
             .sort("week_start")
         )
-        dates = daily_agg.select("week_start").to_series().to_list()
-        donations = daily_agg.select("total_donations").to_series().to_list()
-        x_label = "Week Starting (Monday)"
+        x_col, x_label = "week_start", "Week Starting (Monday)"
     else:  # Monthly
         daily_agg = (
             chart_df
@@ -218,19 +294,26 @@ with tab1:
             .agg(pl.col("donations").sum().alias("total_donations"), pl.col("date").min().alias("month_date"))
             .sort("year", "month")
         )
-        dates = daily_agg.select("month_date").to_series().to_list()
-        donations = daily_agg.select("total_donations").to_series().to_list()
-        x_label = "Month"
+        x_col, x_label = "month_date", "Month"
 
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(dates, donations, linewidth=1.5, color="#e74c3c", alpha=0.8)
-    ax.fill_between(dates, donations, alpha=0.2, color="#e74c3c")
-    ax.set_xlabel(x_label, fontsize=11)
-    ax.set_ylabel("Number of Donations", fontsize=11)
-    ax.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    st.pyplot(fig)
+    fig = px.area(
+        daily_agg.to_pandas(),
+        x=x_col,
+        y="total_donations",
+        template=PLOTLY_TEMPLATE,
+        color_discrete_sequence=["#e74c3c"],
+    )
+    fig.update_traces(
+        hovertemplate=f"{x_label}: %{{x}}<br>Donations: %{{y:,.0f}}<extra></extra>",
+        line_width=2,
+    )
+    fig.update_layout(
+        xaxis_title=x_label,
+        yaxis_title="Number of Donations",
+        hovermode="x unified",
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
     st.subheader("Donations by State")
@@ -247,31 +330,121 @@ with tab2:
         chart_df
         .group_by("state")
         .agg(pl.col("donations").sum().alias("total_donations"))
-        .sort("total_donations", descending=True)
+        .sort("total_donations")
     )
 
-    states_list = state_agg.select("state").to_series().to_list()
-    state_totals = state_agg.select("total_donations").to_series().to_list()
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    bars = ax.barh(states_list, state_totals, color="#3498db")
-    ax.set_xlabel("Total Donations", fontsize=11)
-    ax.set_title("Total Donations by State", fontsize=13, fontweight="bold")
-    ax.grid(True, alpha=0.3, axis='x')
-
-    # Format x-axis to use comma notation instead of scientific notation
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
-
-    # Add value labels on bars with padding
-    for bar in bars:
-        width = bar.get_width()
-        ax.text(width * 0.98, bar.get_y() + bar.get_height()/2,
-                f'{int(width):,}', ha='right', va='center', fontsize=9, color='white', fontweight='bold')
-
-    plt.tight_layout()
-    st.pyplot(fig)
+    fig = px.bar(
+        state_agg.to_pandas(),
+        x="total_donations",
+        y="state",
+        orientation="h",
+        template=PLOTLY_TEMPLATE,
+        color="total_donations",
+        color_continuous_scale="Reds",
+        text="total_donations",
+    )
+    fig.update_traces(
+        texttemplate="%{text:,.0f}",
+        textposition="outside",
+        hovertemplate="State: %{y}<br>Donations: %{x:,.0f}<extra></extra>",
+    )
+    fig.update_layout(
+        xaxis_title="Total Donations",
+        yaxis_title="",
+        coloraxis_showscale=False,
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=max(400, 28 * state_agg.height),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 with tab3:
+    st.subheader("Historical Trends by State")
+    st.caption(
+        "Compare how selected states trend over time, with an optional rolling average "
+        "to smooth day-to-day noise."
+    )
+
+    # Use only blood_type='all' if selected, else use filtered data to avoid double counting
+    chart_df = (
+        filtered_df.filter(pl.col("blood_type") == "all")
+        if "all" in effective_blood_types
+        else filtered_df
+    )
+
+    trend_states = st.multiselect(
+        "States to plot",
+        options=states,
+        default=(selected_states if selected_states else states)[: min(5, len(states))],
+        help="Choose which states to overlay on the trend chart",
+    )
+    rolling_window = st.select_slider(
+        "Rolling average window (days)",
+        options=[1, 7, 14, 30],
+        value=7,
+        help="1 = raw daily values, higher values smooth out noise",
+    )
+
+    if not trend_states:
+        st.info("Select at least one state to view its trend.")
+    else:
+        state_daily = (
+            chart_df
+            .filter(pl.col("state").is_in(trend_states))
+            .group_by(["state", "date"])
+            .agg(pl.col("donations").sum().alias("donations"))
+        )
+        state_daily = dashboard_utils.add_rolling_average(
+            state_daily, value_col="donations", window=rolling_window, group_col="state"
+        )
+
+        fig = px.line(
+            state_daily.sort(["state", "date"]).to_pandas(),
+            x="date",
+            y="donations_rolling_avg",
+            color="state",
+            template=PLOTLY_TEMPLATE,
+        )
+        fig.update_traces(
+            hovertemplate="%{fullData.name}<br>%{x}<br>Donations: %{y:,.0f}<extra></extra>",
+            line_width=2,
+        )
+        fig.update_layout(
+            xaxis_title="Date",
+            yaxis_title=f"Donations ({rolling_window}-day avg)" if rolling_window > 1 else "Donations",
+            hovermode="x unified",
+            legend_title="State",
+            margin=dict(l=10, r=10, t=30, b=10),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Year-over-year style comparison: total donations per state, per year
+        st.subheader("Yearly Totals by State")
+        yearly_state = (
+            chart_df
+            .filter(pl.col("state").is_in(trend_states))
+            .with_columns(pl.col("date").dt.year().alias("year"))
+            .group_by(["state", "year"])
+            .agg(pl.col("donations").sum().alias("total_donations"))
+            .sort(["year", "state"])
+        )
+        fig_year = px.bar(
+            yearly_state.to_pandas(),
+            x="year",
+            y="total_donations",
+            color="state",
+            barmode="group",
+            template=PLOTLY_TEMPLATE,
+        )
+        fig_year.update_traces(hovertemplate="%{fullData.name}<br>Year: %{x}<br>Donations: %{y:,.0f}<extra></extra>")
+        fig_year.update_layout(
+            xaxis_title="Year",
+            yaxis_title="Total Donations",
+            legend_title="State",
+            margin=dict(l=10, r=10, t=30, b=10),
+        )
+        st.plotly_chart(fig_year, use_container_width=True)
+
+with tab4:
     st.subheader("Donations by Blood Type")
 
     # Aggregate by blood type (exclude 'all' as it's the sum of others)
@@ -283,25 +456,23 @@ with tab3:
         .sort("total_donations", descending=True)
     )
 
-    blood_types_list = blood_agg.select("blood_type").to_series().to_list()
-    blood_totals = blood_agg.select("total_donations").to_series().to_list()
-
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        colors = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"]
-        wedges, texts, autotexts = ax.pie(
-            blood_totals, labels=blood_types_list, autopct='%1.1f%%',
-            colors=colors[:len(blood_types_list)], startangle=90
+        fig = px.pie(
+            blood_agg.to_pandas(),
+            names="blood_type",
+            values="total_donations",
+            hole=0.4,
+            template=PLOTLY_TEMPLATE,
+            color_discrete_sequence=["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6"],
         )
-        ax.set_title("Blood Type Distribution", fontsize=13, fontweight="bold")
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontsize(10)
-            autotext.set_fontweight('bold')
-        plt.tight_layout()
-        st.pyplot(fig)
+        fig.update_traces(
+            textinfo="label+percent",
+            hovertemplate="%{label}<br>Donations: %{value:,.0f}<br>Share: %{percent}<extra></extra>",
+        )
+        fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         st.dataframe(
@@ -312,7 +483,7 @@ with tab3:
             hide_index=True
         )
 
-with tab4:
+with tab5:
     st.subheader("Average Donations By Day of the Week")
 
     # Use only blood_type='all' if selected, else use filtered data to avoid double counting
@@ -343,23 +514,25 @@ with tab4:
     )
 
     day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    dow_values = dow_agg.select("day_of_week").to_series().to_list()
-    dow_donations = dow_agg.select("avg_donations").to_series().to_list()
+    dow_agg = dow_agg.with_columns(
+        pl.col("day_of_week").map_elements(lambda d: day_names[d % 7], return_dtype=pl.Utf8).alias("day_name")
+    )
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    bars = ax.bar([day_names[d % 7] for d in dow_values], dow_donations, color="#2ecc71")
-    ax.set_ylabel("Average Daily Donations", fontsize=11)  # noqa
-    ax.set_title("Average Donations by Day of Week", fontsize=13, fontweight="bold")
-    ax.grid(True, alpha=0.3, axis='y')
-
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2, height,
-                f'{int(height):,}', ha='center', va='bottom', fontsize=9)
-
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    st.pyplot(fig)
+    fig = px.bar(
+        dow_agg.to_pandas(),
+        x="day_name",
+        y="avg_donations",
+        template=PLOTLY_TEMPLATE,
+        color_discrete_sequence=["#2ecc71"],
+        text_auto=",.0f",
+    )
+    fig.update_traces(hovertemplate="%{x}<br>Avg Donations: %{y:,.0f}<extra></extra>")
+    fig.update_layout(
+        xaxis_title="",
+        yaxis_title="Average Daily Donations",
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
     # Average donations by month
     st.subheader("Average Donations by Month")
@@ -380,22 +553,25 @@ with tab4:
     )
 
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    month_values = month_agg.select("month").to_series().to_list()
-    month_donations = month_agg.select("avg_donations").to_series().to_list()
+    month_agg = month_agg.with_columns(
+        pl.col("month").map_elements(lambda m: month_names[m - 1], return_dtype=pl.Utf8).alias("month_name")
+    )
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    bars = ax.bar([month_names[m-1] for m in month_values], month_donations, color="#e67e22")
-    ax.set_ylabel("Average Daily Donations", fontsize=11)
-    ax.set_title("Average Donations by Month", fontsize=13, fontweight="bold")
-    ax.grid(True, alpha=0.3, axis='y')
-
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2, height,
-                f'{int(height):,}', ha='center', va='bottom', fontsize=9)
-
-    plt.tight_layout()
-    st.pyplot(fig)
+    fig = px.bar(
+        month_agg.to_pandas(),
+        x="month_name",
+        y="avg_donations",
+        template=PLOTLY_TEMPLATE,
+        color_discrete_sequence=["#e67e22"],
+        text_auto=",.0f",
+    )
+    fig.update_traces(hovertemplate="%{x}<br>Avg Donations: %{y:,.0f}<extra></extra>")
+    fig.update_layout(
+        xaxis_title="",
+        yaxis_title="Average Daily Donations",
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
     # Average donations by week
     st.subheader("Average Donations by Week of Year")
@@ -409,20 +585,23 @@ with tab4:
         .sort("week")
     )
 
-    week_values = week_agg.select("week").to_series().to_list()
-    week_donations = week_agg.select("avg_donations").to_series().to_list()
+    fig = px.area(
+        week_agg.to_pandas(),
+        x="week",
+        y="avg_donations",
+        template=PLOTLY_TEMPLATE,
+        color_discrete_sequence=["#9b59b6"],
+        markers=True,
+    )
+    fig.update_traces(hovertemplate="Week %{x}<br>Avg Donations: %{y:,.0f}<extra></extra>")
+    fig.update_layout(
+        xaxis_title="Week of Year",
+        yaxis_title="Average Daily Donations",
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(week_values, week_donations, linewidth=1.5, color="#9b59b6", marker='o', markersize=4, alpha=0.8)
-    ax.fill_between(week_values, week_donations, alpha=0.2, color="#9b59b6")
-    ax.set_xlabel("Week of Year", fontsize=11)
-    ax.set_ylabel("Average Daily Donations", fontsize=11)
-    ax.set_title("Average Donations by Week of Year", fontsize=13, fontweight="bold")
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    st.pyplot(fig)
-
-with tab5:
+with tab6:
     st.subheader("🔮 Predict Next Day Donations")
 
     # Check if API is running

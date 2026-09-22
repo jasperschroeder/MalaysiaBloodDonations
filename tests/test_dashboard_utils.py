@@ -14,6 +14,8 @@ from src.dashboard_utils import (
     infer_lag_values,
     call_prediction_api,
     calculate_180day_average,
+    compute_period_over_period_delta,
+    add_rolling_average,
     API_URL
 )
 
@@ -567,3 +569,99 @@ class TestCalculate180DayAverage:
         
         # Each day has 1200 total (3 * 400), so average should be 1200
         assert result == 1200.0
+
+
+# ============================================================================
+# Test compute_period_over_period_delta
+# ============================================================================
+
+class TestComputePeriodOverPeriodDelta:
+    """Test suite for compute_period_over_period_delta function."""
+
+    def test_current_and_previous_period_totals(self):
+        """Total for current window and equal-length previous window are both computed."""
+        base_date = datetime.date(2024, 1, 1)
+        dates = [base_date + datetime.timedelta(days=i) for i in range(20)]
+        # First 10 days: 100 donations/day, next 10 days: 200 donations/day
+        donations = [100] * 10 + [200] * 10
+        df = pl.DataFrame({"date": dates, "donations": donations})
+
+        start_date = base_date + datetime.timedelta(days=10)
+        end_date = base_date + datetime.timedelta(days=19)
+
+        result = compute_period_over_period_delta(df, start_date, end_date)
+
+        assert result["current_total"] == 2000
+        assert result["previous_total"] == 1000
+        assert result["absolute_change"] == 1000
+        assert result["pct_change"] == pytest.approx(100.0)
+
+    def test_no_prior_data_returns_none_for_comparison(self):
+        """When no data exists before the selected window, comparison fields are None."""
+        base_date = datetime.date(2024, 1, 1)
+        dates = [base_date + datetime.timedelta(days=i) for i in range(5)]
+        df = pl.DataFrame({"date": dates, "donations": [100] * 5})
+
+        result = compute_period_over_period_delta(df, base_date, dates[-1])
+
+        assert result["current_total"] == 500
+        assert result["previous_total"] is None
+        assert result["absolute_change"] is None
+        assert result["pct_change"] is None
+
+    def test_zero_previous_total_avoids_division_by_zero(self):
+        """A previous period that sums to zero should not raise and yields pct_change None."""
+        base_date = datetime.date(2024, 1, 1)
+        dates = [base_date + datetime.timedelta(days=i) for i in range(10)]
+        donations = [0] * 5 + [100] * 5
+        df = pl.DataFrame({"date": dates, "donations": donations})
+
+        start_date = base_date + datetime.timedelta(days=5)
+        end_date = base_date + datetime.timedelta(days=9)
+
+        result = compute_period_over_period_delta(df, start_date, end_date)
+
+        assert result["current_total"] == 500
+        assert result["previous_total"] == 0
+        assert result["pct_change"] is None
+
+
+# ============================================================================
+# Test add_rolling_average
+# ============================================================================
+
+class TestAddRollingAverage:
+    """Test suite for add_rolling_average function."""
+
+    def test_rolling_average_without_group(self):
+        """Rolling average is computed in date order across the whole dataframe."""
+        base_date = datetime.date(2024, 1, 1)
+        dates = [base_date + datetime.timedelta(days=i) for i in range(4)]
+        df = pl.DataFrame({"date": dates, "donations": [10, 20, 30, 40]})
+
+        result = add_rolling_average(df, value_col="donations", window=2)
+
+        assert result.sort("date").select("donations_rolling_avg").to_series().to_list() == [
+            10.0, 15.0, 25.0, 35.0
+        ]
+
+    def test_rolling_average_per_group(self):
+        """Rolling average is computed independently per group when group_col is provided."""
+        base_date = datetime.date(2024, 1, 1)
+        dates = [base_date + datetime.timedelta(days=i) for i in range(2)] * 2
+        states = ["Selangor", "Selangor", "Johor", "Johor"]
+        donations = [10, 20, 100, 200]
+        df = pl.DataFrame({"date": dates, "state": states, "donations": donations})
+
+        result = add_rolling_average(df, value_col="donations", window=2, group_col="state")
+        result = result.sort(["state", "date"])
+
+        selangor_avgs = (
+            result.filter(pl.col("state") == "Selangor").select("donations_rolling_avg").to_series().to_list()
+        )
+        johor_avgs = (
+            result.filter(pl.col("state") == "Johor").select("donations_rolling_avg").to_series().to_list()
+        )
+
+        assert selangor_avgs == [10.0, 15.0]
+        assert johor_avgs == [100.0, 150.0]
