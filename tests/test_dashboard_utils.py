@@ -11,6 +11,7 @@ import datetime
 from unittest.mock import Mock, patch
 import requests
 from src.dashboard_utils import (
+    aggregate_state_blood_type_donations,
     infer_lag_values,
     call_prediction_api,
     calculate_180day_average,
@@ -665,3 +666,19 @@ class TestAddRollingAverage:
 
         assert selangor_avgs == [10.0, 15.0]
         assert johor_avgs == [100.0, 150.0]
+
+
+class TestAggregateStateBloodTypeDonations:
+    def test_excludes_overlapping_all_rows_and_sums_components(self):
+        df = pl.DataFrame({
+            "state": ["Selangor", "Selangor", "Selangor", "Johor"],
+            "blood_type": ["all", "a", "a", "o"],
+            "donations": [999, 10, 15, 7],
+        })
+
+        result = aggregate_state_blood_type_donations(df, ["all", "a", "o"])
+
+        assert result.sort(["state", "blood_type"]).to_dicts() == [
+            {"state": "Johor", "blood_type": "o", "total_donations": 7},
+            {"state": "Selangor", "blood_type": "a", "total_donations": 25},
+        ]
