@@ -120,9 +120,14 @@ selected_states = st.sidebar.multiselect(
     help="Choose one or more states to display"
 )
 
+blood_type_order = ["all", "a", "b", "ab", "o"]
+blood_type_options = sorted(
+    blood_types,
+    key=lambda bt: blood_type_order.index(bt) if bt in blood_type_order else len(blood_type_order)
+)
 selected_blood_types = st.sidebar.multiselect(
     "Select Blood Types",
-    options=blood_types,
+    options=blood_type_options,
     help="Choose blood types to display"
 )
 
@@ -377,10 +382,12 @@ with tab3:
         default=(selected_states if selected_states else states)[: min(5, len(states))],
         help="Choose which states to overlay on the trend chart",
     )
-    rolling_window = st.select_slider(
+    rolling_window = st.radio(
         "Rolling average window (days)",
         options=[1, 7, 14, 30],
-        value=7,
+        index=1,
+        format_func=lambda days: "1 (raw)" if days == 1 else str(days),
+        horizontal=True,
         help="1 = raw daily values, higher values smooth out noise",
     )
 
