@@ -10,6 +10,19 @@ API_HEALTH_CHECK_RETRIES = 10
 API_HEALTH_CHECK_DELAY = 1
 
 
+def aggregate_state_blood_type_donations(
+    data: pl.DataFrame, blood_types: list[str]
+) -> pl.DataFrame:
+    """Aggregate component blood types by state without the overlapping `all` rows."""
+    component_types = [blood_type for blood_type in blood_types if blood_type != "all"]
+    return (
+        data
+        .filter(pl.col("blood_type").is_in(component_types))
+        .group_by(["state", "blood_type"])
+        .agg(pl.col("donations").sum().alias("total_donations"))
+    )
+
+
 def infer_lag_values(data: pl.DataFrame, prediction_date: datetime.date) -> dict:
     """
     Infer the last 7 days of donations (lags) from the dataset.

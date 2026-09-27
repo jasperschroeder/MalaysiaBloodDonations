@@ -205,6 +205,42 @@ period_delta = dashboard_utils.compute_period_over_period_delta(
 
 # Headline KPI row in the main content area
 st.subheader("📊 Overview")
+state_totals = (
+    metrics_source_df
+    .group_by("state")
+    .agg(pl.col("donations").sum().alias("total_donations"))
+    .sort("total_donations", descending=True)
+)
+leading_state = state_totals.row(0, named=True)
+export_df = (
+    filtered_df.filter(pl.col("blood_type") == "all")
+    if "all" in effective_blood_types
+    else filtered_df
+)
+state_scope = f"{len(selected_states) if selected_states else len(states)} states"
+blood_type_scope = (
+    "all blood types"
+    if "all" in effective_blood_types
+    else ", ".join(blood_type.upper() for blood_type in effective_blood_types)
+)
+scope_columns = st.columns([3, 1])
+scope_columns[0].caption(
+    f"{start_date:%b %d, %Y} to {end_date:%b %d, %Y} · "
+    f"{state_scope} · {blood_type_scope} · "
+    f"Latest observation: {date_max:%b %d, %Y}"
+)
+scope_columns[1].download_button(
+    "Download filtered CSV",
+    data=export_df.write_csv().encode("utf-8"),
+    file_name=f"malaysia_blood_donations_{start_date:%Y%m%d}_{end_date:%Y%m%d}.csv",
+    mime="text/csv",
+    use_container_width=True,
+    help="Export the rows matching the current state, blood type, and date filters",
+)
+st.caption(
+    f"Leading state in this selection: **{leading_state['state']}** "
+    f"({leading_state['total_donations']:,.0f} donations)"
+)
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric("Total Donations", f"{total_donations:,.0f}")
 kpi2.metric("Avg Daily Donations", f"{avg_daily_donations:,.0f}")
@@ -361,6 +397,48 @@ with tab2:
         height=max(400, 28 * state_agg.height),
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    heatmap_types = [
+        blood_type
+        for blood_type in (selected_blood_types or blood_types)
+        if blood_type != "all"
+    ]
+    if heatmap_types:
+        heatmap_df = (
+            filtered_df
+            .filter(pl.col("blood_type").is_in(heatmap_types))
+            .group_by(["state", "blood_type"])
+            .agg(pl.col("donations").sum().alias("total_donations"))
+        )
+        st.subheader("Blood Type Mix by State")
+        st.caption(
+            "Component blood groups only; the overlapping all-types total is excluded."
+        )
+        heatmap = px.density_heatmap(
+            heatmap_df.to_pandas(),
+            x="blood_type",
+            y="state",
+            z="total_donations",
+            histfunc="sum",
+            category_orders={"blood_type": heatmap_types},
+            color_continuous_scale="Reds",
+            template=PLOTLY_TEMPLATE,
+        )
+        heatmap.update_traces(
+            hovertemplate=(
+                "State: %{y}<br>Blood type: %{x}<br>Donations: %{z:,.0f}<extra></extra>"
+            )
+        )
+        heatmap.update_layout(
+            xaxis_title="Blood Type",
+            yaxis_title="",
+            coloraxis_colorbar_title="Donations",
+            margin=dict(l=10, r=10, t=30, b=10),
+            height=max(400, 28 * heatmap_df.get_column("state").n_unique()),
+        )
+        st.plotly_chart(heatmap, use_container_width=True)
+    else:
+        st.info("Select one or more component blood types to view the state heatmap.")
 
 with tab3:
     st.subheader("Historical Trends by State")
