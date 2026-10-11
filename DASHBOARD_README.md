@@ -33,6 +33,9 @@ The Malaysia Blood Donations Dashboard provides:
   - Weekly patterns showing donation trends by day of week
   - Monthly and week-of-year seasonality charts
 - **🔮 Predictions Tab**: Next-day donation forecast powered by the ML prediction API, with a period comparison against the 180-day average
+- **📝 Weekly Review Tab**: Compare state and blood-group donations with the previous four complete weeks, review reporting coverage, and export a CSV. Incomplete weeks are not treated as zero; signals are descriptive and do not indicate inventory shortages or clinical need.
+- **🎊 Holidays Tab**: View upcoming national or selected-state public holidays and estimated dates, then compare observed holiday donations with nearby non-holiday dates on the same weekday. These historical comparisons are descriptive, not causal; local collection schedules are not represented.
+- **🎊 Holidays Tab**: View upcoming national public holidays and estimated dates, then compare observed holiday donations with nearby non-holiday dates on the same weekday. These historical comparisons are descriptive, not causal; state-specific holidays are not included.
 
 All charts are built with Plotly for interactive hover tooltips, zoom/pan, and legend toggling.
 

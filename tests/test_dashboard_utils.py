@@ -17,6 +17,9 @@ from src.dashboard_utils import (
     calculate_180day_average,
     compute_period_over_period_delta,
     add_rolling_average,
+    build_weekly_surveillance_table,
+    get_upcoming_holidays,
+    build_holiday_impact_table,
     API_URL
 )
 
@@ -682,3 +685,111 @@ class TestAggregateStateBloodTypeDonations:
             {"state": "Johor", "blood_type": "o", "total_donations": 7},
             {"state": "Selangor", "blood_type": "a", "total_donations": 25},
         ]
+
+
+class TestBuildWeeklySurveillanceTable:
+    def test_compares_complete_week_to_four_complete_weeks(self):
+        week_start = datetime.date(2024, 1, 29)
+        dates = [
+            week_start - datetime.timedelta(days=28) + datetime.timedelta(days=offset)
+            for offset in range(35)
+        ]
+        df = pl.DataFrame({
+            "date": dates * 2,
+            "state": ["Selangor"] * 70,
+            "blood_type": ["o"] * 35 + ["all"] * 35,
+            "donations": [10] * 28 + [15] * 7 + [10000] * 35,
+        })
+
+        result = build_weekly_surveillance_table(df, week_start)
+        row = result.row(0, named=True)
+
+        assert row["observed_days"] == 7
+        assert row["coverage_pct"] == 100.0
+        assert row["donations"] == 105
+        assert row["baseline_mean"] == 70.0
+        assert row["change_pct"] == pytest.approx(50.0)
+        assert row["signal"] == "Review: above baseline"
+
+    def test_missing_day_is_incomplete_not_a_drop(self):
+        week_start = datetime.date(2024, 1, 29)
+        dates = [
+            week_start - datetime.timedelta(days=28) + datetime.timedelta(days=offset)
+            for offset in range(35)
+            if offset != 32
+        ]
+        df = pl.DataFrame({
+            "date": dates,
+            "state": ["Selangor"] * len(dates),
+            "blood_type": ["o"] * len(dates),
+            "donations": [10] * 28 + [15] * 6,
+        })
+
+        row = build_weekly_surveillance_table(df, week_start).row(0, named=True)
+
+        assert row["observed_days"] == 6
+        assert row["coverage_pct"] == pytest.approx(600 / 7)
+        assert row["change_pct"] is None
+        assert row["signal"] == "Incomplete current week"
+
+    def test_requires_monday_week_start(self):
+        df = pl.DataFrame({
+            "date": [datetime.date(2024, 1, 1)],
+            "state": ["Selangor"],
+            "blood_type": ["o"],
+            "donations": [10],
+        })
+
+        with pytest.raises(ValueError, match="Monday"):
+            build_weekly_surveillance_table(df, datetime.date(2024, 1, 2))
+
+
+class TestHolidaySurveillance:
+    def test_upcoming_holidays_include_estimate_marker(self):
+        calendar = pl.DataFrame({
+            "date": [datetime.date(2024, 2, 5), datetime.date(2024, 2, 7)],
+            "name": ["Example holiday (estimated)", "Later holiday"],
+        })
+
+        result = get_upcoming_holidays(
+            calendar, datetime.date(2024, 2, 4), days_ahead=1
+        )
+
+        assert result.select("name", "estimated").to_dicts() == [
+            {"name": "Example holiday (estimated)", "estimated": True}
+        ]
+
+    def test_holiday_impact_uses_nearby_same_weekdays_only(self):
+        start = datetime.date(2024, 1, 1)
+        dates = [start + datetime.timedelta(days=offset) for offset in range(65)]
+        donations = [100] * len(dates)
+        event_date = datetime.date(2024, 2, 5)
+        nearby_holiday = datetime.date(2024, 1, 29)
+        donations[(event_date - start).days] = 50
+        donations[(nearby_holiday - start).days] = 999
+        daily = pl.DataFrame({"date": dates, "donations": donations})
+        calendar = pl.DataFrame({
+            "date": [event_date, nearby_holiday],
+            "name": ["Example holiday", "Nearby holiday"],
+        })
+
+        result = build_holiday_impact_table(daily, calendar)
+        row = result.filter(pl.col("date") == event_date).row(0, named=True)
+
+        assert row["baseline_mean"] == 100
+        assert row["comparison_days"] == 7
+        assert row["change_pct"] == -50
+
+    def test_holiday_impact_omits_change_without_enough_comparison_days(self):
+        event_date = datetime.date(2024, 2, 5)
+        daily = pl.DataFrame({
+            "date": [event_date - datetime.timedelta(days=7), event_date],
+            "donations": [100, 50],
+        })
+        calendar = pl.DataFrame({"date": [event_date], "name": ["Example holiday"]})
+
+        row = build_holiday_impact_table(daily, calendar).row(0, named=True)
+
+        assert row["comparison_days"] == 1
+        assert row["baseline_mean"] is None
+        assert row["change_pct"] is None
