@@ -15,6 +15,7 @@ import dashboard_utils
 sys.path.insert(0, str(Path(__file__).parent))
 
 from donations.setup_and_validation import download_data  # noqa
+from donations.data_preparation import get_malaysia_holidays  # noqa
 
 # Page configuration
 st.set_page_config(
@@ -281,13 +282,15 @@ def ensure_api_running():
 
 PLOTLY_TEMPLATE = "plotly_white"
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 Time Series",
     "🗺️ State Comparison",
     "📊 State Trends",
     "🔴 Blood Type Analysis",
     "📅 Patterns & Trends",
-    "🔮 Predictions"
+    "🔮 Predictions",
+    "📝 Weekly Review",
+    "🎊 Holidays"
 ])
 
 with tab1:
@@ -693,10 +696,9 @@ with tab6:
     api_status, api_message = ensure_api_running()
 
     if not api_status:
-        st.error(f"⚠️ {api_message}")
-        st.stop()
-
-    st.success("✅ API is online")
+        st.warning(f"{api_message} Predictions are unavailable, but historical reviews remain available.")
+    else:
+        st.success("✅ API is online")
 
     # Prediction date selector
     st.subheader("Prediction Date")
@@ -861,6 +863,207 @@ with tab6:
                 }
                 for key, value in holiday_info.items():
                     st.write(f"- {key}: {'✅' if value else '❌'}")
+
+with tab7:
+    st.subheader("Weekly Donation Review")
+    st.caption(
+        "Review state and blood-group donation patterns against the previous four "
+        "complete weeks. Signals are descriptive and do not indicate inventory "
+        "shortages or clinical need."
+    )
+    st.info(
+        "A missing state and blood-group observation is treated as incomplete "
+        "reporting, not as zero donations. Comparisons are shown only when the "
+        "selected week and all four baseline weeks have seven observed days."
+    )
+
+    first_week = date_min - datetime.timedelta(days=date_min.weekday())
+    last_week = date_max - datetime.timedelta(days=date_max.weekday())
+    week_count = ((last_week - first_week).days // 7) + 1
+    available_weeks = [
+        first_week + datetime.timedelta(days=7 * offset)
+        for offset in range(week_count)
+    ]
+    default_week_index = max(0, len(available_weeks) - 2)
+
+    control_col, threshold_col = st.columns([3, 1])
+    with control_col:
+        selected_week = st.selectbox(
+            "Week beginning",
+            options=available_weeks,
+            index=default_week_index,
+            format_func=lambda week: (
+                f"{week:%d %b %Y} to "
+                f"{(week + datetime.timedelta(days=6)):%d %b %Y}"
+            ),
+        )
+    with threshold_col:
+        review_threshold = st.slider(
+            "Review threshold (%)",
+            min_value=5,
+            max_value=100,
+            value=20,
+            step=5,
+            help="Flag changes at or beyond this percentage from the four-week mean.",
+        )
+
+    report = dashboard_utils.build_weekly_surveillance_table(
+        df,
+        selected_week,
+        min_change_pct=float(review_threshold),
+    )
+    incomplete_count = report.filter(
+        pl.col("signal").str.starts_with("Incomplete")
+    ).height
+    review_count = report.filter(
+        pl.col("signal").str.starts_with("Review:")
+    ).height
+    mean_coverage = report.get_column("coverage_pct").mean() or 0.0
+
+    coverage_metric, signals_metric, incomplete_metric = st.columns(3)
+    coverage_metric.metric("Mean state/type coverage", f"{mean_coverage:.1f}%")
+    signals_metric.metric("Changes to review", review_count)
+    incomplete_metric.metric("Incomplete state/type weeks", incomplete_count)
+
+    display_report = report.rename({
+        "state": "State",
+        "blood_type": "Blood group",
+        "week_start": "Week beginning",
+        "observed_days": "Days reported",
+        "coverage_pct": "Coverage (%)",
+        "donations": "Donations reported",
+        "baseline_mean": "4-week mean",
+        "change_pct": "Change (%)",
+        "signal": "Review status",
+    })
+    st.dataframe(
+        display_report.sort(["Review status", "State", "Blood group"]),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.download_button(
+        "Download weekly review CSV",
+        data=report.write_csv().encode("utf-8"),
+        file_name=f"donation_weekly_review_{selected_week:%Y%m%d}.csv",
+        mime="text/csv",
+    )
+
+with tab8:
+    st.subheader("Upcoming public holidays")
+    today = datetime.date.today()
+    holiday_region = st.selectbox(
+        "Calendar and analysis area",
+        options=["Malaysia (national)", *states],
+        help=(
+            "State calendars include national holidays plus observances for "
+            "the selected state."
+        ),
+        key="holiday_region",
+    )
+    holiday_state = None if holiday_region == "Malaysia (national)" else holiday_region
+    holiday_horizon = st.slider(
+        "Look ahead (days)",
+        min_value=30,
+        max_value=365,
+        value=90,
+        step=30,
+    )
+    future_calendar = get_malaysia_holidays(
+        today.year, today.year + 1, state=holiday_state
+    )
+    upcoming_holidays = dashboard_utils.get_upcoming_holidays(
+        future_calendar, today, days_ahead=holiday_horizon
+    )
+    st.caption(
+        "State calendars include national and state-level observances. Dates "
+        "marked estimated may change, especially religious holidays; check "
+        "official announcements before planning."
+    )
+    if upcoming_holidays.height:
+        st.dataframe(
+            upcoming_holidays.rename({
+                "date": "Date",
+                "name": "Holiday",
+                "estimated": "Estimated date",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("No holidays are listed in this date range.")
+
+    st.subheader("Historical donation patterns around holidays")
+    st.caption(
+        "Each holiday is compared with observed non-holiday dates on the same "
+        "weekday within 28 days before or after it. This is descriptive, not "
+        "evidence that a holiday caused the difference."
+    )
+    st.caption(
+        f"Calendar selected: {holiday_region}. Local collection schedules "
+        "and donor attendance are not represented."
+    )
+    component_blood_types = [
+        blood_type for blood_type in blood_types if blood_type != "all"
+    ]
+    holiday_blood_type = st.selectbox(
+        "Blood group",
+        options=["all", *component_blood_types],
+        format_func=lambda value: "All types" if value == "all" else value.upper(),
+        key="holiday_blood_type",
+    )
+
+    holiday_scope_data = df.filter(pl.col("blood_type") == holiday_blood_type)
+    if holiday_state is not None:
+        holiday_scope_data = holiday_scope_data.filter(
+            pl.col("state") == holiday_state
+        )
+    holiday_daily_totals = (
+        holiday_scope_data
+        .group_by("date")
+        .agg(pl.col("donations").sum().alias("donations"))
+    )
+    historical_calendar = get_malaysia_holidays(
+        date_min.year, date_max.year, state=holiday_state
+    )
+    holiday_impact = dashboard_utils.build_holiday_impact_table(
+        holiday_daily_totals,
+        historical_calendar,
+    )
+    usable_impacts = holiday_impact.filter(pl.col("change_pct").is_not_null())
+
+    if usable_impacts.height:
+        holiday_summary = (
+            usable_impacts
+            .group_by("name")
+            .agg(
+                pl.len().alias("Observed occurrences"),
+                pl.col("change_pct").median().alias("Median change (%)"),
+                pl.col("comparison_days").median().alias("Median comparison days"),
+            )
+            .sort("Median change (%)")
+        )
+        st.markdown("**Observed change by holiday**")
+        st.dataframe(holiday_summary, use_container_width=True, hide_index=True)
+
+        st.markdown("**Individual holiday dates**")
+        st.dataframe(
+            usable_impacts.rename({
+                "date": "Date",
+                "name": "Holiday",
+                "estimated": "Estimated date",
+                "donations": "Donations",
+                "baseline_mean": "Matched-weekday mean",
+                "change_pct": "Change (%)",
+                "comparison_days": "Comparison days",
+            }).sort("Date", descending=True),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info(
+            "There are not enough observed non-holiday weekdays around the "
+            "listed holiday dates to estimate a comparison yet."
+        )
 
 # Footer
 st.sidebar.markdown("---")

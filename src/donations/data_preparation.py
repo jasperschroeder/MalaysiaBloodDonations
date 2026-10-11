@@ -46,6 +46,8 @@ EXCLUDED_HOLIDAY_NAMES = [
 
 HOLIDAY_NAME_CLEANUP_PATTERNS = [
     r"\s*\(Hari Kedua\)",
+    r"\s*\(Second Day\)",
+    r"\s*\(estimated\)",
     r"\s*\(pergantian hari\)",
     r"\s*\(pilihan raya umum\)",
     r"\s+ke-\d+$",  # e.g. "Hari Pertabalan Yang di-Pertuan Agong ke-15"
@@ -89,6 +91,41 @@ _HOLIDAY_NAME_TO_FLAGS = {
     for name in names
 }
 
+HOLIDAY_NAME_ALIASES = {
+    "Islamic New Year": "Awal Muharam",
+    "Prophet Muhammad's Birthday": "Hari Keputeraan Nabi Muhammad S.A.W.",
+    "Christmas Day": "Hari Krismas",
+    "Chinese New Year": "Tahun Baharu Cina",
+    "Eid al-Fitr": "Hari Raya Puasa",
+    "Eid al-Adha": "Hari Raya Qurban",
+    "Vesak Day": "Hari Wesak",
+    "Labor Day": "Hari Pekerja",
+    "Birthday of HM Yang di-Pertuan Agong": (
+        "Hari Keputeraan Rasmi Seri Paduka Baginda Yang di-Pertuan Agong"
+    ),
+    "Malaysia Day": "Hari Malaysia",
+    "National Day": "Hari Kebangsaan",
+}
+
+MALAYSIA_STATE_SUBDIVISIONS = {
+    "Johor": "01",
+    "Kedah": "02",
+    "Kelantan": "03",
+    "Melaka": "04",
+    "Negeri Sembilan": "05",
+    "Pahang": "06",
+    "Pulau Pinang": "07",
+    "Perak": "08",
+    "Perlis": "09",
+    "Selangor": "10",
+    "Terengganu": "11",
+    "Sabah": "12",
+    "Sarawak": "13",
+    "W.P. Kuala Lumpur": "14",
+    "W.P. Labuan": "15",
+    "W.P. Putrajaya": "16",
+}
+
 
 def _clean_holiday_name(name: str) -> str:
     """Apply the same name normalisation as the EDA notebook."""
@@ -108,16 +145,27 @@ def categorize_holiday_name(name: str) -> set:
     """
     flags = set()
     for part in str(name).split(";"):
-        flags |= _HOLIDAY_NAME_TO_FLAGS.get(_clean_holiday_name(part), set())
+        cleaned_name = _clean_holiday_name(part)
+        canonical_name = HOLIDAY_NAME_ALIASES.get(cleaned_name, cleaned_name)
+        flags |= _HOLIDAY_NAME_TO_FLAGS.get(canonical_name, set())
     return flags
 
 
-def get_malaysia_holidays(start_year: int, end_year: int) -> pl.DataFrame:
-    """Return a (date, name) frame of Malaysian public holidays."""
+def get_malaysia_holidays(
+    start_year: int, end_year: int, state: str | None = None
+) -> pl.DataFrame:
+    """Return national holidays, optionally including one state's observances."""
+    subdivision = None
+    if state is not None:
+        try:
+            subdivision = MALAYSIA_STATE_SUBDIVISIONS[state]
+        except KeyError as error:
+            raise ValueError(f"Unsupported Malaysian state: {state}") from error
+
     holiday_rows = [
         {"date": date, "name": name}
         for date, name in holidays.country_holidays(
-            "MY", years=range(start_year, end_year + 1)
+            "MY", subdiv=subdivision, years=range(start_year, end_year + 1)
         ).items()
     ]
     df = pl.DataFrame(holiday_rows)

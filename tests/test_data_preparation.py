@@ -38,6 +38,14 @@ class TestCategorizeHolidayName:
         assert "is_other_holiday" in flags
         assert "is_religion_or_culture_holiday" in flags
 
+    def test_english_calendar_names(self):
+        assert dp.categorize_holiday_name("National Day") == {
+            "is_high_donation_holiday", "is_other_holiday"
+        }
+        assert dp.categorize_holiday_name("Eid al-Fitr (estimated)") == {
+            "is_low_donation_holiday", "is_religion_or_culture_holiday"
+        }
+
     def test_cleanup_patterns(self):
         assert dp.categorize_holiday_name("Hari Raya Puasa (Hari Kedua)") == {
             "is_low_donation_holiday", "is_religion_or_culture_holiday"
@@ -138,11 +146,25 @@ class TestHolidayFlags:
     def test_hari_raya_puasa_is_low_donation(self):
         import holidays as holidays_lib
         my = holidays_lib.country_holidays("MY", years=[2024])
-        raya = next(d for d, n in my.items() if "Hari Raya Puasa" in n)
+        raya = next(
+            d for d, name in my.items()
+            if "Hari Raya Puasa" in name or "Eid al-Fitr" in name
+        )
         df = pl.DataFrame({"date": [raya], "all": [100]})
         row = dp.add_holiday_flags(df).row(0, named=True)
         assert row["is_low_donation_holiday"] == 1
         assert row["is_religion_or_culture_holiday"] == 1
+
+    def test_state_calendar_includes_state_only_holidays(self):
+        national = dp.get_malaysia_holidays(2026, 2026)
+        sabah = dp.get_malaysia_holidays(2026, 2026, state="Sabah")
+
+        assert national.filter(pl.col("name").str.contains("Kaamatan")).is_empty()
+        assert sabah.filter(pl.col("name").str.contains("Kaamatan")).height == 2
+
+    def test_state_calendar_rejects_unknown_state(self):
+        with pytest.raises(ValueError, match="Unsupported Malaysian state"):
+            dp.get_malaysia_holidays(2026, 2026, state="Atlantis")
 
 
 class TestCalendarAndLags:
