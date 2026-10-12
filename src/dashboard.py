@@ -864,6 +864,107 @@ with tab6:
                 for key, value in holiday_info.items():
                     st.write(f"- {key}: {'✅' if value else '❌'}")
 
+    st.markdown("---")
+    st.subheader("📅 Operational Multi-Day Planning Simulator (7 to 21 Days)")
+    st.caption(
+        "Simulate expected collections across the upcoming planning horizon against baseline demand."
+    )
+
+    sim_col1, sim_col2 = st.columns([2, 1])
+    with sim_col1:
+        sim_start_date = st.date_input(
+            "Simulation Start Date",
+            value=tomorrow,
+            min_value=tomorrow,
+            max_value=tomorrow + datetime.timedelta(days=60),
+            help="Beginning of the planning window",
+        )
+    with sim_col2:
+        sim_horizon_days = st.selectbox(
+            "Planning Horizon",
+            options=[7, 14, 21],
+            format_func=lambda d: f"{d} Days ({d // 7} Weeks)",
+            index=1,
+            help="Number of days to simulate daily collections against baseline demand",
+        )
+
+    # Get holiday calendar covering the simulation window
+    sim_end_date = sim_start_date + datetime.timedelta(days=sim_horizon_days)
+    sim_hol_calendar = get_malaysia_holidays(sim_start_date.year, sim_end_date.year)
+    sim_lags = dashboard_utils.infer_lag_values(df, sim_start_date)
+    recent_baseline = dashboard_utils.calculate_180day_average(df, sim_start_date, avg_daily_donations)
+
+    sim_results = dashboard_utils.simulate_multi_day_donations(
+        start_date=sim_start_date,
+        days=sim_horizon_days,
+        recent_lags=sim_lags,
+        holiday_calendar=sim_hol_calendar,
+        recent_baseline_daily=recent_baseline,
+    )
+
+    total_proj = sim_results.get_column("projected_donations").sum()
+    total_base = sim_results.get_column("baseline_donations").sum()
+    net_gap = total_proj - total_base
+    net_gap_pct = (net_gap / total_base * 100) if total_base > 0 else 0
+
+    kpi1, kpi2, kpi3 = st.columns(3)
+    kpi1.metric("Projected Total Collections", f"{total_proj:,.0f} units")
+    kpi2.metric("Baseline Target Requirement", f"{total_base:,.0f} units")
+    kpi3.metric(
+        "Projected Net Balance",
+        f"{net_gap:+,.0f} units ({net_gap_pct:+.1f}%)",
+        delta=f"{net_gap:+,.0f} units",
+        delta_color="normal" if net_gap >= 0 else "inverse",
+    )
+
+    if net_gap < 0:
+        st.warning(
+            f"⚠️ **Operational Deficit Alert:** A projected shortfall of **{abs(net_gap):,.0f} units** "
+            f"is expected over this {sim_horizon_days}-day window relative to baseline demand."
+        )
+    else:
+        st.success(
+            f"✅ **Stable Inflow Projected:** Collections are tracking at or above normal baseline "
+            f"(+{net_gap:,.0f} units buffer)."
+        )
+
+    fig_sim = px.line(
+        sim_results.to_pandas(),
+        x="date",
+        y=["projected_donations", "baseline_donations"],
+        template=PLOTLY_TEMPLATE,
+        color_discrete_map={
+            "projected_donations": "#e74c3c",
+            "baseline_donations": "#7f8c8d",
+        },
+        markers=True,
+    )
+    fig_sim.update_layout(
+        xaxis_title="Date",
+        yaxis_title="Units / Day",
+        legend_title="Series",
+        margin=dict(l=10, r=10, t=20, b=10),
+    )
+    st.plotly_chart(fig_sim, use_container_width=True)
+
+    with st.expander("Detailed Simulation Breakdown", expanded=False):
+        st.dataframe(
+            sim_results.rename({
+                "date": "Date",
+                "day_name": "Day",
+                "is_holiday": "Holiday?",
+                "holiday_name": "Holiday Name",
+                "projected_donations": "Projected Units",
+                "baseline_donations": "Baseline Units",
+                "daily_net": "Daily Net",
+                "cumulative_projected": "Cumul. Projected",
+                "cumulative_baseline": "Cumul. Baseline",
+                "cumulative_net": "Cumul. Net",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
+
 with tab7:
     st.subheader("Weekly Donation Review")
     st.caption(
@@ -992,16 +1093,11 @@ with tab8:
     else:
         st.info("No holidays are listed in this date range.")
 
-    st.subheader("Historical donation patterns around holidays")
+    st.subheader("⚠️ Early Warning: Festive Slump & Deficit Risk Scorecard")
     st.caption(
-        "Each holiday is compared with observed non-holiday dates on the same "
-        "weekday within 28 days before or after it. This is descriptive, not "
-        "evidence that a holiday caused the difference."
+        "Projected supply risk for upcoming holidays based on historical collection drops."
     )
-    st.caption(
-        f"Calendar selected: {holiday_region}. Local collection schedules "
-        "and donor attendance are not represented."
-    )
+
     component_blood_types = [
         blood_type for blood_type in blood_types if blood_type != "all"
     ]
@@ -1028,6 +1124,57 @@ with tab8:
     holiday_impact = dashboard_utils.build_holiday_impact_table(
         holiday_daily_totals,
         historical_calendar,
+    )
+
+    # Compute baseline daily volume for the selected scope
+    recent_scope_baseline = dashboard_utils.calculate_180day_average(
+        holiday_scope_data if holiday_blood_type == "all" else (
+            holiday_scope_data.with_columns(pl.lit("all").alias("blood_type"))
+        ),
+        date_max,
+        avg_daily_donations,
+    )
+
+    festive_risk_df = dashboard_utils.calculate_upcoming_festive_risk(
+        upcoming_holidays,
+        holiday_impact,
+        recent_daily_baseline=recent_scope_baseline,
+    )
+
+    if festive_risk_df.height > 0:
+        high_risk_holidays = festive_risk_df.filter(pl.col("risk_level").str.starts_with("🔴"))
+        if high_risk_holidays.height > 0:
+            first_high = high_risk_holidays.row(0, named=True)
+            st.error(
+                f"🚨 **High Shortage Warning:** **{first_high['name']}** is {first_high['days_away']} days away "
+                f"({first_high['date']:%d %b %Y}). Historical median slump is **{first_high['median_change_pct']:.1f}%** "
+                f"(projected drop of **{abs(first_high['projected_unit_diff']):,.0f} units/day**)."
+            )
+
+        st.dataframe(
+            festive_risk_df.rename({
+                "date": "Date",
+                "name": "Upcoming Holiday",
+                "days_away": "Days Away",
+                "risk_level": "Risk Tier",
+                "median_change_pct": "Hist. Median Change (%)",
+                "baseline_daily_donations": "Daily Baseline",
+                "projected_donations": "Projected Units",
+                "projected_unit_diff": "Expected Daily Net",
+            }).drop("historical_occurrences"),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    st.subheader("Historical donation patterns around holidays")
+    st.caption(
+        "Each holiday is compared with observed non-holiday dates on the same "
+        "weekday within 28 days before or after it. This is descriptive, not "
+        "evidence that a holiday caused the difference."
+    )
+    st.caption(
+        f"Calendar selected: {holiday_region}. Local collection schedules "
+        "and donor attendance are not represented."
     )
     usable_impacts = holiday_impact.filter(pl.col("change_pct").is_not_null())
 

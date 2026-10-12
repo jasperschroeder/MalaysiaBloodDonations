@@ -20,6 +20,8 @@ from src.dashboard_utils import (
     build_weekly_surveillance_table,
     get_upcoming_holidays,
     build_holiday_impact_table,
+    calculate_upcoming_festive_risk,
+    simulate_multi_day_donations,
     API_URL
 )
 
@@ -793,3 +795,54 @@ class TestHolidaySurveillance:
         assert row["comparison_days"] == 1
         assert row["baseline_mean"] is None
         assert row["change_pct"] is None
+
+
+class TestFestiveRiskAndSimulation:
+    def test_calculate_upcoming_festive_risk(self):
+        today = datetime.date.today()
+        upcoming = pl.DataFrame({
+            "date": [today + datetime.timedelta(days=10), today + datetime.timedelta(days=40)],
+            "name": ["Hari Raya Puasa", "Unknown Festival"],
+        })
+        impact = pl.DataFrame({
+            "name": ["Hari Raya Puasa", "Hari Raya Puasa"],
+            "change_pct": [-35.0, -37.0],
+        })
+
+        risk_df = calculate_upcoming_festive_risk(
+            upcoming,
+            impact,
+            recent_daily_baseline=1000.0,
+        )
+
+        assert risk_df.height == 2
+        raya_row = risk_df.filter(pl.col("name") == "Hari Raya Puasa").row(0, named=True)
+        assert raya_row["risk_level"] == "🔴 High Shortage Risk"
+        assert raya_row["median_change_pct"] == -36.0
+        assert raya_row["projected_unit_diff"] < 0
+
+        unknown_row = risk_df.filter(pl.col("name") == "Unknown Festival").row(0, named=True)
+        assert unknown_row["risk_level"] == "⚪ Insufficient History"
+
+    def test_simulate_multi_day_donations(self):
+        start_date = datetime.date(2026, 4, 1)
+        lags = {f"lag{i}": 1000 for i in range(1, 8)}
+        calendar = pl.DataFrame({
+            "date": [datetime.date(2026, 4, 3)],
+            "name": ["Hari Raya Puasa"],
+        })
+
+        sim_df = simulate_multi_day_donations(
+            start_date=start_date,
+            days=7,
+            recent_lags=lags,
+            holiday_calendar=calendar,
+            recent_baseline_daily=1000.0,
+        )
+
+        assert sim_df.height == 7
+        assert "cumulative_net" in sim_df.columns
+        raya_sim = sim_df.filter(pl.col("is_holiday") == True)
+        assert raya_sim.height == 1
+        assert raya_sim.row(0, named=True)["daily_net"] < 0
+
